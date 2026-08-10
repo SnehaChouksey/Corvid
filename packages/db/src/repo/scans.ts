@@ -2,7 +2,8 @@ import type { ScanStatus } from '@corvid/tool-contracts';
 import { and, desc, eq, sql } from 'drizzle-orm';
 
 import type { Database } from '../client.ts';
-import { scans } from '../schema/domain.ts';
+import { scans, targets } from '../schema/domain.ts';
+import type { TargetRow } from './targets.ts';
 
 export type ScanRow = typeof scans.$inferSelect;
 export type NewScan = typeof scans.$inferInsert;
@@ -28,6 +29,25 @@ export async function getScanForOwner(
     .where(and(eq(scans.id, scanId), eq(scans.ownerId, ownerId)))
     .limit(1);
   return rows[0];
+}
+
+/**
+ * Load the target a scan belongs to. Used by trusted system actors (the crawler/tool servers) that
+ * act on a scan id handed to them by the orchestrator — the authorization decision is then made on
+ * the returned target's `authorizationConfirmedAt` + `scopeRules`, NOT on a caller-supplied value.
+ * Returns undefined if the scan does not exist.
+ */
+export async function getTargetForScan(
+  db: Database,
+  scanId: string,
+): Promise<TargetRow | undefined> {
+  const rows = await db
+    .select({ target: targets })
+    .from(scans)
+    .innerJoin(targets, eq(scans.targetId, targets.id))
+    .where(eq(scans.id, scanId))
+    .limit(1);
+  return rows[0]?.target;
 }
 
 export async function listScansForOwner(db: Database, ownerId: string): Promise<ScanRow[]> {

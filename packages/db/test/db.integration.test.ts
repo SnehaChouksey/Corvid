@@ -11,6 +11,7 @@ import {
   createTarget,
   getAuditForScanOwner,
   getTargetForOwner,
+  getTargetForScan,
   listTargetsForOwner,
 } from '../src/index.ts';
 import { users } from '../src/schema/auth.ts';
@@ -68,6 +69,23 @@ test('a target is only visible to its owner — a non-owner gets undefined (404,
   assert.equal((await getTargetForOwner(handle.db, userA, target.id))?.id, target.id);
   assert.equal(await getTargetForOwner(handle.db, userB, target.id), undefined); // no cross-tenant read
   assert.equal((await listTargetsForOwner(handle.db, userB)).length, 0);
+});
+
+test('getTargetForScan resolves a scan to its target (crawler authorization gate, C1)', async () => {
+  const target = await createTarget(handle.db, {
+    ownerId: userA,
+    url: 'https://scan-target.example.com',
+    scopeRules: { hosts: ['scan-target.example.com'] },
+  });
+  const scan = await createScan(handle.db, { ownerId: userA, targetId: target.id, status: 'crawling' });
+
+  const resolved = await getTargetForScan(handle.db, scan.id);
+  assert.equal(resolved?.id, target.id);
+  assert.equal(resolved?.url, 'https://scan-target.example.com');
+  // Not-yet-authorized target: the crawler reads this and refuses (authorizationConfirmedAt null).
+  assert.equal(resolved?.authorizationConfirmedAt, null);
+  // A non-existent scan resolves to undefined (crawler refuses 'scan_not_found').
+  assert.equal(await getTargetForScan(handle.db, '00000000-0000-0000-0000-000000000000'), undefined);
 });
 
 test('audit records are readable only by the owner of their scan', async () => {
