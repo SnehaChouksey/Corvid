@@ -1,4 +1,5 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 
 import * as schema from './schema/index.ts';
@@ -18,4 +19,13 @@ export function createDb(connectionString: string): DbHandle {
   const pool = new Pool({ connectionString });
   const db = drizzle(pool, { schema });
   return { db, pool };
+}
+
+/**
+ * Apply all pending migrations. The migrations folder ships beside the built package, so the path
+ * resolves whether running from `src` or `dist`. Used at boot and by integration tests.
+ */
+export async function runMigrations(handle: DbHandle): Promise<void> {
+  const migrationsFolder = new URL('../migrations', import.meta.url).pathname;
+  await migrate(handle.db, { migrationsFolder });
 }
