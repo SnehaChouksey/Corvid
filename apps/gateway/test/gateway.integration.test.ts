@@ -4,8 +4,10 @@ import { after, before, test } from 'node:test';
 import { createAuth, type Auth } from '@corvid/auth';
 import { createDb, type DbHandle, runMigrations, schema } from '@corvid/db';
 import { createLogger } from '@corvid/logger';
+import { createRedis, honoRateLimitClient } from '@corvid/redis';
 import { eq } from 'drizzle-orm';
 import type { Hono } from 'hono';
+import { RedisStore } from 'hono-rate-limiter';
 
 import { type AppEnv, type AppLimits, createApp } from '../src/app.ts';
 
@@ -15,6 +17,7 @@ import { type AppEnv, type AppLimits, createApp } from '../src/app.ts';
 // DATABASE_URL.
 
 const DATABASE_URL = process.env.DATABASE_URL;
+const REDIS_URL = process.env.REDIS_URL;
 const ORIGIN = 'http://localhost';
 
 if (DATABASE_URL === undefined) {
@@ -155,4 +158,36 @@ function runIntegrationTests(databaseUrl: string): void {
     assert.equal(capped.status, 429); // second refused
     assert.deepEqual(await capped.json(), { error: 'concurrent_scan_cap_reached', cap: 1 });
   });
+
+  // The folded-in Unit 1 follow-up: rate-limit counters in Redis (shared across instances, ADR-20).
+  // Proves the ioredis→RedisStore adapter works end-to-end. Opt-in via REDIS_URL (needs both a
+  // Postgres and a Redis up).
+  if (REDIS_URL === undefined) {
+    test('rate limit uses the Redis store (skipped — set REDIS_URL)', { skip: true }, () => {});
+  } else {
+    const redisUrl = REDIS_URL;
+    test('per-user rate limit enforced via the Redis store (ADR-20)', async () => {
+      const redis = createRedis(redisUrl);
+      try {
+        // Unique prefix per run so leftover counters from a prior run don't interfere.
+        const prefix = `test:rl:${Date.now()}:`;
+        const store = (name: string): RedisStore<AppEnv> =>
+          new RedisStore<AppEnv>({ client: honoRateLimitClient(redis), prefix: `${prefix}${name}:` });
+        const app = createApp({
+          auth,
+          db: handle.db,
+          limits: { ...defaultLimits, max: 2 },
+          logger,
+          rateLimitStore: store,
+        });
+        const cookie = await signUp(app, `redisrl-${Date.now()}@example.com`);
+        const id = '00000000-0000-0000-0000-000000000000';
+        assert.equal((await app.request(`/api/targets/${id}`, authed(cookie))).status, 404);
+        assert.equal((await app.request(`/api/targets/${id}`, authed(cookie))).status, 404);
+        assert.equal((await app.request(`/api/targets/${id}`, authed(cookie))).status, 429);
+      } finally {
+        redis.disconnect();
+      }
+    });
+  }
 }

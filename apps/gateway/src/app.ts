@@ -7,7 +7,7 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { zValidator } from '@hono/zod-validator';
 import { type Context, Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { rateLimiter } from 'hono-rate-limiter';
+import { rateLimiter, type Store } from 'hono-rate-limiter';
 import * as z from 'zod';
 
 // The thin gateway (`02` §6): each handler resolves auth, validates input, calls an owner-scoped
@@ -41,6 +41,12 @@ export interface AppDeps {
   readonly db: Database;
   readonly limits: AppLimits;
   readonly logger: CorvidLogger;
+  /**
+   * Optional per-limiter store factory (keyed by a stable prefix). Wire a Redis-backed store here so
+   * rate-limit counters are shared across gateway instances (ADR-20); when absent, hono-rate-limiter
+   * falls back to its in-memory store — correct for a single instance, per-process across many.
+   */
+  readonly rateLimitStore?: (prefix: string) => Store<AppEnv>;
 }
 
 export type AppEnv = { Variables: { userId: string } };
@@ -60,6 +66,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       limit: deps.limits.authMax,
       standardHeaders: 'draft-7',
       keyGenerator: clientIp,
+      ...(deps.rateLimitStore !== undefined ? { store: deps.rateLimitStore('auth') } : {}),
     }),
   );
   app.on(['POST', 'GET'], '/api/auth/*', (c) => deps.auth.handler(c.req.raw));
@@ -84,6 +91,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       limit: deps.limits.max,
       standardHeaders: 'draft-7',
       keyGenerator: (c) => c.get('userId'),
+      ...(deps.rateLimitStore !== undefined ? { store: deps.rateLimitStore('user') } : {}),
     }),
   );
 

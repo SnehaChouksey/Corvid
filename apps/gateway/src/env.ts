@@ -5,6 +5,9 @@ import * as z from 'zod';
 // config-driven with conservative defaults (D-11); raised on real usage, never hard-coded loose.
 const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
+  // Optional in v1 (Redis provisioning is Unit 0): when set, rate-limit counters are shared across
+  // instances via Redis (ADR-20); when unset, the in-memory store is used (single-instance only).
+  REDIS_URL: z.string().min(1).optional(),
   BETTER_AUTH_SECRET: z.string().min(16),
   BETTER_AUTH_URL: z.url(),
   PORT: z.coerce.number().int().positive().default(8787),
