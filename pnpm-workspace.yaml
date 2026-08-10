@@ -1,3 +1,18 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+allowBuilds:
+  esbuild: set this to true or false
+
+# esbuild's binary is delivered via its optional platform package and works without running its
+# postinstall build script, so we deliberately do NOT run it. Listing it here as an *acknowledged*
+# ignored build script keeps pnpm's supply-chain default (don't execute dependency build scripts)
+# while making `pnpm install` exit 0 instead of erroring on an unreviewed build.
+ignoredBuiltDependencies:
+  - esbuild
+
+# Don't re-run a strict `pnpm install` before every `pnpm run`/turbo task: that pre-run check
+# aborts on the acknowledged-but-not-run esbuild build script above. Installs are managed
+# explicitly here — a tooling-compat setting, not a safety relaxation.
+verifyDepsBeforeRun: false

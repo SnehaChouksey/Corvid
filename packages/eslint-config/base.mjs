@@ -56,6 +56,14 @@ export default tseslint.config(
     },
   },
   {
+    // Config files (drizzle.config.ts, next.config.ts, …) require a default export by framework
+    // convention; exempt them from the named-exports-only rule.
+    files: ['**/*.config.{ts,mts,cts,js,mjs,cjs}'],
+    rules: {
+      'no-restricted-syntax': 'off',
+    },
+  },
+  {
     ignores: ['dist/**'],
   },
 );
