@@ -24,6 +24,14 @@ test('rejects dangerous hosts — loopback/private/link-local/metadata/localhost
   assert.throws(() => parseScopeRules({ hosts: ['app.example.com', '169.254.169.254'] }), AuthorizationError);
 });
 
+test('rejects dangerous IPv6: loopback, ULA, link-local, and IPv4-mapped loopback (M1)', () => {
+  for (const host of ['::1', '[::1]', 'fd00::1', 'fc00::1', 'fe80::1', '[::ffff:127.0.0.1]', '::ffff:7f00:1']) {
+    assert.throws(() => parseScopeRules({ hosts: [host] }), AuthorizationError, `expected ${host} rejected`);
+  }
+  // A routable public IPv6 is allowed.
+  assert.doesNotThrow(() => parseScopeRules({ hosts: ['2606:4700:4700::1111'] }));
+});
+
 test('deriveEgressAllowList = target hosts + OOB, deduped and lowercased', () => {
   const scope = parseScopeRules({ hosts: ['App.Example.com', 'api.example.com', 'app.example.com'] });
   const allow = deriveEgressAllowList(scope, oob);

@@ -33,16 +33,36 @@ export function isDangerousHost(host: string): boolean {
   const h = host.toLowerCase().replace(/\.$/, '');
   if (h === 'localhost' || h.endsWith('.localhost')) return true;
   if (h === 'metadata.google.internal') return true;
-  if (h === '::1' || h === '::' || h === '[::1]') return true;
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
-  if (ipv4) {
-    const a = Number(ipv4[1]);
-    const b = Number(ipv4[2]);
-    if (a === 0 || a === 127 || a === 10) return true; // unspecified, loopback, private
-    if (a === 172 && b >= 16 && b <= 31) return true; // private
-    if (a === 192 && b === 168) return true; // private
-    if (a === 169 && b === 254) return true; // link-local incl. 169.254.169.254 metadata
+
+  // IPv6, with or without brackets (a URL hostname keeps the brackets).
+  const v6 = h.startsWith('[') && h.endsWith(']') ? h.slice(1, -1) : h;
+  if (v6.includes(':')) {
+    if (v6 === '::1' || v6 === '::') return true; // loopback, unspecified
+    if (v6.startsWith('fc') || v6.startsWith('fd')) return true; // unique-local fc00::/7
+    if (v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')) {
+      return true; // link-local fe80::/10
+    }
+    // IPv4-mapped (::ffff:127.0.0.1 or the hex ::ffff:7f00:1): reject ALL — an IPv4-mapped address
+    // in a scope is never legitimate and decoding every form is error-prone, so fail closed.
+    if (v6.startsWith('::ffff:')) return true;
+    // IPv4-compatible/embedded dotted form (::127.0.0.1): re-check the trailing v4 segment.
+    if (isDangerousIpv4(v6.split(':').pop() ?? '')) return true;
+    return false;
   }
+
+  return isDangerousIpv4(h);
+}
+
+/** Loopback / private / link-local (incl. 169.254.169.254 cloud metadata) IPv4 ranges. */
+function isDangerousIpv4(h: string): boolean {
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (ipv4 === null) return false;
+  const a = Number(ipv4[1]);
+  const b = Number(ipv4[2]);
+  if (a === 0 || a === 127 || a === 10) return true; // unspecified, loopback, private
+  if (a === 172 && b >= 16 && b <= 31) return true; // private
+  if (a === 192 && b === 168) return true; // private
+  if (a === 169 && b === 254) return true; // link-local incl. 169.254.169.254 metadata
   return false;
 }
 
