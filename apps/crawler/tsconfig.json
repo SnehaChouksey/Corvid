@@ -1,0 +1,12 @@
+{
+  "extends": "@corvid/typescript-config/node.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // DOM libs are for the Playwright `page.evaluate()` browser-context code in src/fetch.ts,
+    // which legitimately runs in a Chromium page (document/HTMLElement). Scoped to this package
+    // only — no other Corvid service pulls DOM globals into Node code.
+    "lib": ["es2023", "dom", "dom.iterable"]
+  },
+  "include": ["src", "test"],
+  "exclude": ["dist", "node_modules"]
+}
