@@ -19,5 +19,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # Local dev/test Redis: crawl frontier + dedup cache (02 §8), and the gateway rate-limit store.
+  # Production Redis is a managed tier (ADR-D9, Unit 0); this exists so the frontier/dedup and the
+  # Redis-backed rate limiter can be built and tested against a real Redis without provisioning.
+  redis:
+    image: redis:7-alpine
+    container_name: corvid-redis
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   corvid-pgdata:
