@@ -129,3 +129,10 @@ exists yet; once scaffolded, the standard gates are
 `pnpm turbo run typecheck lint test build`. LangGraph's TS SDK is younger than
 its Python one — verify against its current docs before coding, and surface a
 capability gap rather than working around it.
+
+<!-- Added: 2026-08-10 -->
+## Schema validation & MCP SDK
+Use **Zod v4** (`zod@^4`) as the single schema-validation library across the monorepo (env, LLM output, MCP tool args/results, HTTP responses, OOB payloads, REST bodies — CODING_STANDARDS §1). Build MCP tool servers against the **v2 SDK line** (`@modelcontextprotocol/server` / `client`), which uses Zod ≥4.2 internally (not a peer dep) — so there is exactly one Zod major in the repo and no dual-copy type collision. Do NOT mix in the v1 `@modelcontextprotocol/sdk` (it peer-depends on `zod ^3.25 || ^4.0` and has a known duplicate-copy footgun). Author tool input schemas as `z.object({...})`, not a raw shape. Zod v4 error formatting: `z.prettifyError` / `z.treeifyError` (`.format()`/`z.formatError` are deprecated).
+
+## Structured logging
+Use **Pino v10** via the shared `@corvid/logger` package (`import pino from 'pino'` — default import, needs `esModuleInterop`). Never `console.*` in product code (enforced by an ESLint `no-console` rule). Pino `redact` operates on **object property paths only — it never scrubs the message string**. Therefore product code must pass secrets/raw bodies as structured fields (covered by redact paths), never interpolated into the free-text message (CODING_STANDARDS §5, §13).

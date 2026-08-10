@@ -1,1 +1,19 @@
 docs/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.next/
+*.tsbuildinfo
+
+# Tooling caches
+.turbo/
+coverage/
+
+# Env / secrets (never committed — CODING_STANDARDS §9)
+.env
+.env.*
+!.env.example
+

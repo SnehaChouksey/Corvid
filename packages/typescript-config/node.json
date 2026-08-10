@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Corvid Node",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  }
+}
