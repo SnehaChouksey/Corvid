@@ -11,6 +11,7 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
   CONCURRENT_SCAN_CAP: z.coerce.number().int().positive().default(3),
 });
 

@@ -15,6 +15,13 @@
       "when": 1786364252230,
       "tag": "0001_audit_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786366070293,
+      "tag": "0002_audit_immutable_triggers",
+      "breakpoints": true
     }
   ]
 }

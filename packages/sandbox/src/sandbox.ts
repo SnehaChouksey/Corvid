@@ -62,9 +62,11 @@ export async function createTestingSandbox(
   factory: SandboxFactory,
   request: TestingSandboxRequest,
 ): Promise<CreatedTestingSandbox> {
-  // Layer 1 — workflow authorization. Fail closed and loud; never create a sandbox to attack a
-  // target the analyst didn't authorize.
-  if (request.authorization.confirmedAt === null) {
+  // Layer 1 — workflow authorization. Assert the POSITIVE (a real confirmed date), so a missing/
+  // undefined/malformed value fails closed rather than slipping through a `=== null` check. Never
+  // create a sandbox to attack a target the analyst didn't authorize.
+  const confirmedAt = request.authorization.confirmedAt;
+  if (!(confirmedAt instanceof Date) || Number.isNaN(confirmedAt.getTime())) {
     throw new AuthorizationError(
       'Refusing to create a testing sandbox: no recorded authorization for the current scope',
     );

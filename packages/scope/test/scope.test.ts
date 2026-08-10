@@ -16,6 +16,14 @@ test('parseScopeRules accepts valid rules and rejects empty/invalid scope (fail 
   assert.throws(() => parseScopeRules(null), AuthorizationError);
 });
 
+test('rejects dangerous hosts — loopback/private/link-local/metadata/localhost (SSRF, fail closed)', () => {
+  for (const host of ['localhost', '127.0.0.1', '10.0.0.5', '172.16.0.1', '192.168.1.1', '169.254.169.254', 'metadata.google.internal', '::1']) {
+    assert.throws(() => parseScopeRules({ hosts: [host] }), AuthorizationError, `expected ${host} rejected`);
+  }
+  // A public host mixed with a dangerous one still fails (all-or-nothing).
+  assert.throws(() => parseScopeRules({ hosts: ['app.example.com', '169.254.169.254'] }), AuthorizationError);
+});
+
 test('deriveEgressAllowList = target hosts + OOB, deduped and lowercased', () => {
   const scope = parseScopeRules({ hosts: ['App.Example.com', 'api.example.com', 'app.example.com'] });
   const allow = deriveEgressAllowList(scope, oob);

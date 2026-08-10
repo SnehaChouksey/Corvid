@@ -4,7 +4,7 @@ import { after, before, test } from 'node:test';
 import { createAuth, type Auth } from '@corvid/auth';
 import { createDb, type DbHandle, runMigrations, schema } from '@corvid/db';
 import { createLogger } from '@corvid/logger';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { Hono } from 'hono';
 
 import { type AppEnv, type AppLimits, createApp } from '../src/app.ts';
@@ -31,7 +31,7 @@ function runIntegrationTests(databaseUrl: string): void {
   before(async () => {
     handle = createDb(databaseUrl);
     await runMigrations(handle);
-    await handle.db.execute(sql`TRUNCATE TABLE users RESTART IDENTITY CASCADE`);
+    // No TRUNCATE (audit log is immutable); tests use unique emails so prior rows don't interfere.
     auth = createAuth({
       database: handle.db,
       secret: 'test-secret-not-a-real-key-0123456789',
@@ -45,7 +45,7 @@ function runIntegrationTests(databaseUrl: string): void {
   });
 
   const makeApp = (limits: AppLimits): Hono<AppEnv> => createApp({ auth, db: handle.db, limits, logger });
-  const defaultLimits: AppLimits = { windowMs: 60_000, max: 100, concurrentScanCap: 5 };
+  const defaultLimits: AppLimits = { windowMs: 60_000, max: 100, authMax: 100, concurrentScanCap: 5 };
 
   async function signUp(app: Hono<AppEnv>, email: string): Promise<string> {
     const res = await app.request('/api/auth/sign-up/email', {

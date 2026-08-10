@@ -23,6 +23,7 @@ const app = createApp({
   limits: {
     windowMs: env.RATE_LIMIT_WINDOW_MS,
     max: env.RATE_LIMIT_MAX,
+    authMax: env.AUTH_RATE_LIMIT_MAX,
     concurrentScanCap: env.CONCURRENT_SCAN_CAP,
   },
   logger,

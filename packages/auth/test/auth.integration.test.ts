@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { after, before, test } from 'node:test';
 
 import { createDb, type DbHandle, runMigrations, schema } from '@corvid/db';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 import { createAuth, resolveUserId, type Auth } from '../src/index.ts';
 
@@ -27,7 +27,7 @@ function runIntegrationTests(databaseUrl: string): void {
   before(async () => {
     handle = createDb(databaseUrl);
     await runMigrations(handle);
-    await handle.db.execute(sql`TRUNCATE TABLE users RESTART IDENTITY CASCADE`);
+    // No TRUNCATE (audit log is immutable); tests use unique emails so prior rows don't interfere.
     auth = createAuth({
       database: handle.db,
       secret: 'test-secret-not-a-real-key-0123456789',

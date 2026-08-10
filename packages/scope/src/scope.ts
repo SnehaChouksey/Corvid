@@ -24,14 +24,44 @@ export interface OobConfig {
 }
 
 /**
+ * Hosts that must never be in scope: loopback, private/link-local ranges, the cloud metadata
+ * endpoint (169.254.169.254), and localhost. Allowing one would let an authorized scope point the
+ * egress allow-list at internal/SSRF-sensitive infrastructure — fail closed (§9). Defense in depth
+ * alongside proof-of-control (D-7), which is the primary control that a scope is one you own.
+ */
+export function isDangerousHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/\.$/, '');
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (h === 'metadata.google.internal') return true;
+  if (h === '::1' || h === '::' || h === '[::1]') return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (ipv4) {
+    const a = Number(ipv4[1]);
+    const b = Number(ipv4[2]);
+    if (a === 0 || a === 127 || a === 10) return true; // unspecified, loopback, private
+    if (a === 172 && b >= 16 && b <= 31) return true; // private
+    if (a === 192 && b === 168) return true; // private
+    if (a === 169 && b === 254) return true; // link-local incl. 169.254.169.254 metadata
+  }
+  return false;
+}
+
+/**
  * Validate raw scope rules (e.g. a `targets.scope_rules` JSON column) into a typed {@link ScopeRules}.
- * Invalid or empty scope is an authorization refusal — terminal and loud (§4), never a soft default.
+ * Invalid, empty, or dangerous-host scope is an authorization refusal — terminal and loud (§4),
+ * never a soft default.
  */
 export function parseScopeRules(value: unknown): ScopeRules {
   const result = scopeRulesSchema.safeParse(value);
   if (!result.success) {
     throw new AuthorizationError('Invalid or empty target scope', {
       context: { issue_count: result.error.issues.length },
+    });
+  }
+  const dangerous = result.data.hosts.filter(isDangerousHost);
+  if (dangerous.length > 0) {
+    throw new AuthorizationError('Scope contains a disallowed host (loopback/private/link-local/metadata)', {
+      context: { disallowed_count: dangerous.length },
     });
   }
   return result.data;

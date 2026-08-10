@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { after, before, test } from 'node:test';
 
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
 import { createDb, type DbHandle } from '../src/client.ts';
@@ -39,11 +39,11 @@ function runIntegrationTests(databaseUrl: string): void {
 
   before(async () => {
     handle = createDb(databaseUrl);
-  await migrate(handle.db, { migrationsFolder });
-  // Clean slate; cascades clear dependent rows.
-  await handle.db.execute(sql`TRUNCATE TABLE users RESTART IDENTITY CASCADE`);
+    await migrate(handle.db, { migrationsFolder });
+    // No TRUNCATE: the audit log is immutable (can't be truncated), and each test isolates via
+    // fresh unique ids, so accumulated rows from prior runs are harmless.
 
-  const inserted = await handle.db
+    const inserted = await handle.db
     .insert(users)
     .values([
       { name: 'A', email: `a-${Date.now()}@example.com` },
@@ -87,7 +87,7 @@ test('audit records are readable only by the owner of their scan', async () => {
   assert.equal((await getAuditForScanOwner(handle.db, userB, scan.id)).length, 0); // isolated
 });
 
-test('the audit log is structurally append-only: UPDATE and DELETE are no-ops', async () => {
+  test('the audit log is structurally append-only: UPDATE and DELETE are rejected', async () => {
   const target = await createTarget(handle.db, {
     ownerId: userA,
     url: 'https://x.example.com',
@@ -98,14 +98,22 @@ test('the audit log is structurally append-only: UPDATE and DELETE are no-ops', 
     targetId: target.id,
     status: 'authorizing',
   });
-  await appendAudit(handle.db, { scanId: scan.id, action: 'payload.sent', actor: 'agent', detail: 'ok' });
+    await appendAudit(handle.db, { scanId: scan.id, action: 'payload.sent', actor: 'agent', detail: 'ok' });
 
-  // A rogue UPDATE and DELETE must both leave the row untouched (DB rule rewrites them to nothing).
-  await handle.db.update(auditLog).set({ action: 'tampered' }).where(eq(auditLog.scanId, scan.id));
-  await handle.db.delete(auditLog).where(eq(auditLog.scanId, scan.id));
+    // A rogue UPDATE and DELETE must both be REJECTED loudly (trigger raises) — never a silent
+    // no-op that looks like success (§4). Drizzle wraps the driver error, so check the cause chain.
+    const isAppendOnly = (err: unknown): boolean => {
+      const e = err as { message?: string; cause?: { message?: string } };
+      return /append-only/.test(e.message ?? '') || /append-only/.test(e.cause?.message ?? '');
+    };
+    await assert.rejects(
+      handle.db.update(auditLog).set({ action: 'tampered' }).where(eq(auditLog.scanId, scan.id)),
+      isAppendOnly,
+    );
+    await assert.rejects(handle.db.delete(auditLog).where(eq(auditLog.scanId, scan.id)), isAppendOnly);
 
-  const rows = await getAuditForScanOwner(handle.db, userA, scan.id);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0]!.action, 'payload.sent'); // unchanged despite the UPDATE attempt
+    const rows = await getAuditForScanOwner(handle.db, userA, scan.id);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.action, 'payload.sent'); // unchanged
   });
 }

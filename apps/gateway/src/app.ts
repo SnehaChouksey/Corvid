@@ -1,16 +1,11 @@
 import { type Auth, resolveUserId } from '@corvid/auth';
-import {
-  countActiveScansForOwner,
-  createScan,
-  createTarget,
-  type Database,
-  getTargetForOwner,
-} from '@corvid/db';
+import { createScanWithinCap, createTarget, type Database, getTargetForOwner } from '@corvid/db';
 import { AuthorizationError, isCorvidError } from '@corvid/errors';
 import type { CorvidLogger } from '@corvid/logger';
 import { parseScopeRules } from '@corvid/scope';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { zValidator } from '@hono/zod-validator';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { rateLimiter } from 'hono-rate-limiter';
 import * as z from 'zod';
@@ -23,7 +18,22 @@ import * as z from 'zod';
 export interface AppLimits {
   readonly windowMs: number;
   readonly max: number;
+  /** Tighter limit for the unauthenticated auth surface (keyed by client IP). */
+  readonly authMax: number;
   readonly concurrentScanCap: number;
+}
+
+/** Client IP for the auth-surface limiter: proxy header first, then the socket, else a shared bucket. */
+function clientIp(c: Context<AppEnv>): string {
+  const forwarded = c.req.header('x-forwarded-for');
+  if (forwarded !== undefined && forwarded.length > 0) {
+    return forwarded.split(',')[0]!.trim();
+  }
+  try {
+    return getConnInfo(c).remote.address ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 export interface AppDeps {
@@ -38,8 +48,20 @@ export type AppEnv = { Variables: { userId: string } };
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
-  // Public auth surface (Better Auth owns sign-up/sign-in/session). Registered before the protected
-  // sub-app so /api/auth/* is handled here, never routed through the auth guard below.
+  // Public auth surface (Better Auth owns sign-up/sign-in/session). It's the one endpoint an
+  // unauthenticated attacker can reach, so it gets its own IP-keyed rate limit (ADR-20) — the
+  // per-user limiter below can't cover it (there is no user yet). Registered before the handler so
+  // it runs first, and before the protected sub-app so /api/auth/* is never routed through the
+  // user-auth guard.
+  app.use(
+    '/api/auth/*',
+    rateLimiter<AppEnv>({
+      windowMs: deps.limits.windowMs,
+      limit: deps.limits.authMax,
+      standardHeaders: 'draft-7',
+      keyGenerator: clientIp,
+    }),
+  );
   app.on(['POST', 'GET'], '/api/auth/*', (c) => deps.auth.handler(c.req.raw));
 
   const api = new Hono<AppEnv>();
@@ -65,14 +87,16 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     }),
   );
 
-  const createTargetSchema = z.object({
-    url: z.url(),
-    scopeRules: z.object({
-      hosts: z.array(z.string().min(1)).min(1),
-      includePaths: z.array(z.string()).optional(),
-      excludePaths: z.array(z.string()).optional(),
-    }),
-  });
+  const createTargetSchema = z
+    .object({
+      url: z.url(),
+      scopeRules: z.object({
+        hosts: z.array(z.string().min(1)).min(1),
+        includePaths: z.array(z.string()).optional(),
+        excludePaths: z.array(z.string()).optional(),
+      }),
+    })
+    .strict(); // reject unknown keys — a client can't smuggle e.g. authorizationConfirmedAt
 
   api.post('/targets', zValidator('json', createTargetSchema), async (c) => {
     const userId = c.get('userId');
@@ -99,7 +123,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     });
   });
 
-  const createScanSchema = z.object({ targetId: z.uuid() });
+  const createScanSchema = z.object({ targetId: z.uuid() }).strict();
 
   api.post('/scans', zValidator('json', createScanSchema), async (c) => {
     const userId = c.get('userId');
@@ -110,15 +134,21 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       throw new HTTPException(404, { message: 'Not found' });
     }
     // Workflow refuses to start without recorded authorization for the current scope (§7, layer 1).
-    if (target.authorizationConfirmedAt === null) {
+    // Assert the POSITIVE (a real confirmed date) so a missing/undefined value fails closed.
+    const confirmedAt = target.authorizationConfirmedAt;
+    if (!(confirmedAt instanceof Date) || Number.isNaN(confirmedAt.getTime())) {
       throw new AuthorizationError('Target is not authorized for scanning');
     }
-    // Per-user concurrent-scan cap, checked at workflow start (ADR-20) — typed refusal, not a 500.
-    const active = await countActiveScansForOwner(deps.db, userId);
-    if (active >= deps.limits.concurrentScanCap) {
+    // Per-user concurrent-scan cap (ADR-20), enforced ATOMICALLY at workflow start — the count and
+    // insert share one advisory-locked transaction so parallel starts can't fail open. null = capped.
+    const scan = await createScanWithinCap(deps.db, {
+      ownerId: userId,
+      targetId,
+      cap: deps.limits.concurrentScanCap,
+    });
+    if (scan === null) {
       return c.json({ error: 'concurrent_scan_cap_reached', cap: deps.limits.concurrentScanCap }, 429);
     }
-    const scan = await createScan(deps.db, { ownerId: userId, targetId, status: 'authorizing' });
     return c.json({ id: scan.id, status: scan.status }, 201);
   });
 
