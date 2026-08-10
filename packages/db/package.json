@@ -1,0 +1,35 @@
+{
+  "name": "@corvid/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "node --test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@corvid/errors": "workspace:*",
+    "@corvid/tool-contracts": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@corvid/eslint-config": "workspace:*",
+    "@corvid/typescript-config": "workspace:*",
+    "@types/node": "^24.9.0",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.0",
+    "typescript": "~5.9.3"
+  }
+}

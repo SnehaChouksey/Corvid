@@ -1,0 +1,23 @@
+# Local dev/test infrastructure only. Production Postgres is a managed tier (ADR-D9, Unit 0);
+# this exists so the schema, Better Auth, and the LangGraph checkpointer can be built and tested
+# against a real Postgres without external provisioning.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: corvid-postgres
+    environment:
+      POSTGRES_USER: corvid
+      POSTGRES_PASSWORD: corvid
+      POSTGRES_DB: corvid
+    ports:
+      - '5432:5432'
+    volumes:
+      - corvid-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U corvid -d corvid']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  corvid-pgdata:
