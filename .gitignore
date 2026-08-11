@@ -1,5 +1,3 @@
-docs/
-
 # Dependencies
 node_modules/
 
@@ -16,4 +14,7 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# macOS
+.DS_Store
 
