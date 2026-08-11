@@ -23,6 +23,7 @@
     "typescript": "~5.9.3"
   },
   "dependencies": {
+    "@corvid/errors": "workspace:*",
     "ioredis": "^6.0.0"
   }
 }

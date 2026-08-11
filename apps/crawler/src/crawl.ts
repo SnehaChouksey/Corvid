@@ -85,6 +85,8 @@ export interface CrawlDeps {
   readonly frontier: Frontier;
   readonly audit: AuditSink;
   readonly logger: CorvidLogger;
+  /** Wall clock, injectable so the deadline (M8) is testable without real time. Defaults to Date.now. */
+  readonly now?: () => number;
 }
 
 interface MutableEndpoint {
@@ -216,6 +218,13 @@ function stripUrl(raw: string): string {
 const MAX_ENDPOINTS = 5000;
 const MAX_BLOCKED_HOSTS = 50;
 
+// Wall-clock backstop (M8): stops a crawl of hanging/slow pages that maxPages alone can't bound. A
+// safety ceiling, not a target — maxPages is the primary bound. Overridable via CrawlParams.
+const DEFAULT_MAX_DURATION_MS = 900_000; // 15 minutes
+
+/** Why the crawl loop stopped — recorded in the completion audit for accountability (ADR-16). */
+type StopReason = 'drained' | 'max_pages' | 'deadline';
+
 /** Seed URL + bounds for a crawl. Derived server-side from the scan's target — never from a raw
  * tool argument (see the contract). `scope` is already validated by the caller. */
 export interface CrawlParams {
@@ -223,6 +232,8 @@ export interface CrawlParams {
   readonly targetUrl: string;
   readonly maxPages: number;
   readonly maxDepth: number;
+  /** Wall-clock ceiling for the whole crawl (M8). Defaults to DEFAULT_MAX_DURATION_MS. */
+  readonly maxDurationMs?: number;
 }
 
 export async function crawl(
@@ -260,10 +271,19 @@ export async function crawl(
   let pagesAttempted = 0;
   let skippedOutOfScope = 0;
 
+  const now = deps.now ?? Date.now;
+  const deadline = now() + (params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
+  let stopReason: StopReason = 'drained';
+
   try {
     // Bound on ATTEMPTS, not successes: a page that fails to load still consumes the budget, so a
     // flood of failing URLs can't run unbounded (H1).
     while (pagesAttempted < params.maxPages) {
+      // Stop before starting more work once past the deadline, even with budget left (M8).
+      if (now() >= deadline) {
+        stopReason = 'deadline';
+        break;
+      }
       const item = await deps.frontier.dequeue();
       if (item === null) break;
 
@@ -338,6 +358,9 @@ export async function crawl(
         if (next.length > 0) await deps.frontier.enqueue(next);
       }
     }
+    // Distinguish a spent page budget from a naturally drained frontier (the loop condition exits
+    // silently on either); 'deadline' was already set on that break above.
+    if (stopReason === 'drained' && pagesAttempted >= params.maxPages) stopReason = 'max_pages';
   } catch (err) {
     // Infra failure mid-crawl (Redis down, etc.) — leave a terminal audit record so the trail has a
     // start AND an end (ADR-16), then propagate. Per-page fetch errors are handled above and don't
@@ -370,6 +393,7 @@ export async function crawl(
     scanId: params.scanId,
     action: 'crawl.completed',
     detail: safeDetail({
+      stopReason,
       pagesVisited,
       endpointsFound: endpoints.size,
       skippedOutOfScope,

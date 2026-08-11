@@ -256,6 +256,8 @@ test('empty-surface target completes cleanly with a completion audit (01 §5)', 
   assert.equal(result.endpoints[0]?.url, 'https://app.example.com/');
   assert.equal(result.authFlows.length, 0);
   assert.deepEqual(audit.actions(), ['crawl.started', 'crawl.completed']);
+  const completed = audit.entries.find((e) => e.action === 'crawl.completed');
+  assert.ok(completed?.detail?.includes('"stopReason":"drained"'));
 });
 
 test('respects maxPages and maxDepth bounds', async () => {
@@ -282,4 +284,58 @@ test('respects maxPages and maxDepth bounds', async () => {
   // depth 0: /, depth 1: /a ; /b would be depth 2 > maxDepth so never enqueued.
   assert.deepEqual(fetcher.visited, ['https://app.example.com/', 'https://app.example.com/a']);
   assert.equal(result.stats.pagesVisited, 2);
+});
+
+/** A page that links to a fresh URL each visit, so the frontier never drains within a test window. */
+class ChainFetcher implements PageFetcher {
+  visited = 0;
+  readonly #onFetch: () => void;
+  constructor(onFetch: () => void = () => {}) {
+    this.#onFetch = onFetch;
+  }
+  async fetchPage(url: string): Promise<PageResult> {
+    this.visited++;
+    this.#onFetch();
+    return {
+      finalUrl: url,
+      links: [`https://app.example.com/p${this.visited}`],
+      forms: [],
+      sentRequests: [],
+      blockedRequests: [],
+    };
+  }
+}
+
+test('stops at the wall-clock deadline with budget and frontier left (M8)', async () => {
+  // Injected clock advances 100ms per fetch; deadline is 250ms → the 4th check (now=300) breaks.
+  let clock = 0;
+  const fetcher = new ChainFetcher(() => {
+    clock += 100;
+  });
+  const audit = new FakeAudit();
+  const result = await crawl(params({ maxPages: 1000, maxDepth: 1000, maxDurationMs: 250 }), scope, {
+    fetcher,
+    frontier: new FakeFrontier(),
+    audit,
+    logger,
+    now: () => clock,
+  });
+  assert.equal(fetcher.visited, 3);
+  assert.equal(result.stats.pagesVisited, 3);
+  const completed = audit.entries.find((e) => e.action === 'crawl.completed');
+  assert.ok(completed?.detail?.includes('"stopReason":"deadline"'));
+});
+
+test('records stopReason max_pages when the page budget is spent (M8)', async () => {
+  const fetcher = new ChainFetcher();
+  const audit = new FakeAudit();
+  const result = await crawl(params({ maxPages: 2, maxDepth: 1000 }), scope, {
+    fetcher,
+    frontier: new FakeFrontier(),
+    audit,
+    logger,
+  });
+  assert.equal(result.stats.pagesVisited, 2);
+  const completed = audit.entries.find((e) => e.action === 'crawl.completed');
+  assert.ok(completed?.detail?.includes('"stopReason":"max_pages"'));
 });

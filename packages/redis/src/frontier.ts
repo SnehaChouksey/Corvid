@@ -1,3 +1,4 @@
+import { InfraError } from '@corvid/errors';
 import type { Redis } from 'ioredis';
 
 export interface FrontierItem {
@@ -6,6 +7,30 @@ export interface FrontierItem {
 }
 
 const NAMESPACE = 'corvid:crawl';
+
+/** A pipeline result tuple as ioredis returns it: `[error, value]` per queued command. */
+type PipelineResult = [Error | null, unknown];
+
+/**
+ * Fail closed on a Redis pipeline failure (M5): a `null` result (batch aborted) or an error in any
+ * tuple leaves the frontier's post-condition unknown, so surface an InfraError rather than let a
+ * caller read "no result" as "nothing to do" — a silent empty enqueue of the seed would otherwise
+ * make a crawl "complete" against an empty surface. Retryable; the crawl loop audits before rethrow.
+ */
+function assertPipelineOk(results: PipelineResult[] | null, op: string): PipelineResult[] {
+  if (results === null) {
+    throw new InfraError(`Redis frontier ${op} pipeline returned no result`, { retryable: true });
+  }
+  for (const [err] of results) {
+    if (err !== null) {
+      throw new InfraError(`Redis frontier ${op} pipeline command failed`, {
+        retryable: true,
+        cause: err,
+      });
+    }
+  }
+  return results;
+}
 
 /**
  * Redis-backed crawl frontier + dedup set, namespaced per scan (`02` §8).
@@ -40,8 +65,7 @@ export class CrawlFrontier {
 
     const addPipe = this.#redis.pipeline();
     for (const item of items) addPipe.sadd(this.seenKey, item.url);
-    const results = await addPipe.exec();
-    if (results === null) return 0;
+    const results = assertPipelineOk(await addPipe.exec(), 'dedup');
 
     const pushPipe = this.#redis.pipeline();
     let enqueued = 0;
@@ -58,7 +82,10 @@ export class CrawlFrontier {
     if (enqueued > 0) {
       pushPipe.expire(this.frontierKey, this.#ttlSeconds);
       pushPipe.expire(this.seenKey, this.#ttlSeconds);
-      await pushPipe.exec();
+      // If this pipeline is lost, the URLs are marked seen (SADD above) but not queued — they'd be
+      // silently dropped from the crawl. Fail closed so the crawl aborts instead of proceeding on
+      // partial state (M5).
+      assertPipelineOk(await pushPipe.exec(), 'enqueue');
     }
     return enqueued;
   }
@@ -67,6 +94,17 @@ export class CrawlFrontier {
   async dequeue(): Promise<FrontierItem | null> {
     const raw = await this.#redis.lpop(this.frontierKey);
     if (raw === null) return null;
+    // Refresh both keys' TTL on every active dequeue (M4): only enqueue reset it before, so a long
+    // crawl that stopped discovering links could let the dedup/frontier state expire mid-crawl and
+    // lose the termination guarantee. A Redis error here propagates and fails closed (M5).
+    assertPipelineOk(
+      await this.#redis
+        .pipeline()
+        .expire(this.frontierKey, this.#ttlSeconds)
+        .expire(this.seenKey, this.#ttlSeconds)
+        .exec(),
+      'ttl-refresh',
+    );
     return JSON.parse(raw) as FrontierItem;
   }
 
