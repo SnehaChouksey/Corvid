@@ -318,6 +318,16 @@ Zero-false-positives (ADR-01) rests entirely on each class's deterministic signa
 **Alternatives considered:** run the crawl inside E2B from the start (heavier: E2B's 1h/24h lifecycle vs. an arbitrarily long crawl; deferred, not rejected); page-level routing (rejected — misses popups/SW/WS).
 **Doc:** `03` Unit 2; `02` §10
 
+### ADR-30 — Hypothesis `plan` stored as a jsonb column
+**Status:** ✅ Resolved 2026-08-12 (Unit 3 build) — no prior D-## (a §5 schema gap surfaced building the persist slab)
+**Context:** `02` §6 requires `GET /scans/:id/hypotheses` to return an **intended payload**, and §10's testers need `method`/`param`/payload-family — but the `02` §5 `hypotheses` table only had `endpoint`/`vuln_class`/`rationale`/`fingerprint`/`status`, with nowhere to persist those. **Decision:** add a single nullable **`plan` jsonb** column (over discrete typed columns). At hypothesize time it holds `{ method, param?, payloadFamily }`; the `plan` node adds `{ tool, intendedPayload }`; Unit 4/5 extend it with the concrete payload — additively, no further migration. Matches §5's existing jsonb usage (`scope_rules`, `proof_of_control`); validated at the service layer via `hypothesisPlanSchema` (stored typed via `$type<>()`). **Alternatives considered:** discrete columns (more queryable but every later plan/payload field is a new migration — rejected for churn); re-deriving the plan at test time (an extra LLM call + loses the approved determinism — rejected).
+**Doc:** `02` §5, §6; `03` Unit 3
+
+### ADR-31 — `stopped` scan lifecycle state for a pre-approval halt
+**Status:** ✅ Resolved 2026-08-12 (Unit 3 build, from the Unit 3 safety review) — no prior D-##
+**Context:** When `hypothesize` returns a generation error (`01` §12) or trips the daily spend stop (ADR-21), the scan run ends before the approval gate. The `02` §5.1 state machine had no state for "ended before approval," so the graph left `status` at a stale `hypothesizing` while the run had terminated — a dashboard would read an ended scan as in-progress. **Decision:** add **`stopped`** to `ScanStatus`; a `markStopped` graph node sets it on that branch, with the specific reason on the scan-runtime `hypothesizeStatus`. It is **re-runnable** (hypothesize is a replay-safe upsert, ADR-27) and **not "active"** for the concurrent-scan cap (ADR-20). Text column, so no DB migration — the union plus a §5.1 state. **Alternatives considered:** reuse `cancelled`/`rejected` (wrong semantics — those are human/authorization outcomes); interpret the `status`+`hypothesizeStatus` pair without a new state (rejected — leaves `status` misleading on its own).
+**Doc:** `02` §5.1; `03` Unit 3
+
 ---
 
 ## D. How to add to this log

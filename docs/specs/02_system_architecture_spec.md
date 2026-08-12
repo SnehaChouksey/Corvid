@@ -355,6 +355,8 @@ erDiagram
     SCANS ||--o{ HYPOTHESES : "produces"
     HYPOTHESES ||--o| FINDINGS : "may yield"
     SCANS ||--o{ AUDIT_LOG : "records"
+    SCANS ||--o{ LLM_CALLS : "bills"
+    USERS ||--o{ LLM_CALLS : "bills"
 
     USERS {
         uuid id PK
@@ -388,6 +390,7 @@ erDiagram
         string rationale
         string fingerprint
         string status
+        json plan
     }
     FINDINGS {
         uuid id PK
@@ -407,11 +410,26 @@ erDiagram
         text detail
         timestamp timestamp
     }
+    LLM_CALLS {
+        uuid id PK
+        uuid scan_id FK
+        uuid user_id FK
+        string purpose
+        string model
+        numeric cost_credits
+        int prompt_tokens
+        int completion_tokens
+        int total_tokens
+        boolean is_byok
+        timestamp created_at
+    }
 ```
 
 - `status` on `hypotheses`: `pending → approved | rejected → tested → confirmed | not_confirmed`.
 - `verified` on `findings` is the **single gate** the Report Writer checks — no other field is sufficient to include a finding in a report.
-- `fingerprint` on `hypotheses` is what the Redis dedup cache keys on so a hypothesis already tested in a scan is never re-sent — `hash(vuln_class + normalized method+path + param + payload family)` (D-10 resolved, ADR-D10).
+- `fingerprint` on `hypotheses` is what the Redis dedup cache keys on so a hypothesis already tested in a scan is never re-sent — `hash(vuln_class + normalized method+path + param + payload family)` (D-10 resolved, ADR-D10). A **unique `(scan_id, fingerprint)` index** makes hypothesis persistence a replay-safe upsert (`onConflictDoNothing`), the durable counterpart to the Redis cache (ADR-27).
+- `plan` on `hypotheses` (jsonb, ADR-30, Unit 3): the structured test plan the reasoning core writes — `method` / `param` / `payload family` at hypothesize time, extended by the `plan` node with the selected tester and the human-readable **intended payload** shown at the approval gate (§6). Validated at the service layer (`hypothesisPlanSchema`).
+- `llm_calls` (ADR-21, Unit 3): the per-call LLM spend ledger. Each `hypothesize`/report call writes one row at the call site; the daily hard-stop sums `cost_credits` for the current UTC day, globally and per user (`user_id` denormalized so the per-user cap is a direct sum). `cost_credits` is null when the gateway doesn't report it (e.g. BYOK). `scan_id`/`user_id` are plain FKs (like `audit_log`), so spend history outlives the scan.
 - `severity` on `findings` is a **CVSS 3.1 base score + vector string** (D-3 resolved, ADR-D3); the Critical/High/… band is derived from the score at read time, not stored.
 - **Tenancy (ADR-19):** `users` is Better Auth's identity table; `targets` and `scans` carry `owner_id`, and every query for a target/scan/hypothesis/finding/audit row is scoped to the owning user. There is no cross-tenant read path — isolation is enforced in the data layer, not by UI absence. v1 is single-user; org/team tenancy is a V2 upgrade via Better Auth's organization plugin (`05`).
 - `proof_of_control` on `targets` records the evidence that the owner actually controls the target (D-7 / ADR-D7) — the anti-abuse counterpart to `authorization_confirmed_at`, so a recorded authorization can't be a bare self-assertion.
@@ -428,6 +446,7 @@ stateDiagram-v2
     Authorizing --> Rejected : no valid scope
     Crawling --> Hypothesizing : attack surface mapped
     Hypothesizing --> AwaitingApproval : candidates generated
+    Hypothesizing --> Stopped : generation error / spend stop (ADR-30, re-runnable)
     AwaitingApproval --> Testing : human approves
     AwaitingApproval --> Cancelled : human rejects all / cancels
     Testing --> Testing : next hypothesis
@@ -436,6 +455,7 @@ stateDiagram-v2
     Rejected --> [*]
     Cancelled --> [*]
     Completed --> [*]
+    Stopped --> [*]
 ```
 
 ---
