@@ -390,6 +390,9 @@ importers:
 
   packages/scan-runtime:
     dependencies:
+      '@corvid/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
       '@corvid/tool-contracts':
         specifier: workspace:*
         version: link:../tool-contracts
