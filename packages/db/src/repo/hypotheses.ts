@@ -1,5 +1,5 @@
 import type { HypothesisPlan, VulnClass } from '@corvid/tool-contracts';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 import type { Database } from '../client.ts';
 import { hypotheses } from '../schema/domain.ts';
@@ -54,4 +54,23 @@ export async function listHypothesesForScan(db: Database, scanId: string): Promi
     .from(hypotheses)
     .where(eq(hypotheses.scanId, scanId))
     .orderBy(asc(hypotheses.createdAt));
+}
+
+/**
+ * Replace a hypothesis's `plan` (the `plan` node's output: selected tool + intended payload on top
+ * of the fingerprint inputs). Scoped by scan id as well as hypothesis id so a plan write can't touch
+ * another scan's row. Returns the updated row, or undefined if no such hypothesis in that scan.
+ */
+export async function setHypothesisPlan(
+  db: Database,
+  scanId: string,
+  hypothesisId: string,
+  plan: HypothesisPlan,
+): Promise<HypothesisRow | undefined> {
+  const rows = await db
+    .update(hypotheses)
+    .set({ plan })
+    .where(and(eq(hypotheses.id, hypothesisId), eq(hypotheses.scanId, scanId)))
+    .returning();
+  return rows[0];
 }

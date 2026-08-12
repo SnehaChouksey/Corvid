@@ -63,6 +63,11 @@ export const hypothesisPlanSchema = z
     method: httpMethodSchema,
     param: paramSchema.optional(),
     payloadFamily: z.string().min(1),
+    // Added by the `plan` node (Unit 3): the selected tester (a `02` §10 tool name) and a
+    // human-readable intended payload shown at the approval gate (`02` §6). The concrete payload
+    // that gets sent lands in Unit 4 — this is the analyst-facing description, not a live payload.
+    tool: z.string().min(1).optional(),
+    intendedPayload: z.string().min(1).optional(),
   })
   .strict();
 export type HypothesisPlan = z.infer<typeof hypothesisPlanSchema>;
