@@ -186,3 +186,24 @@ test('a dedup-cache warm failure does not fail the node (the durable DB write al
   const outcome = await hypothesize(failing, { scanId: 's1', userId: 'u1', surface });
   assert.equal(outcome.kind, 'generated');
 });
+
+test('an empty surface short-circuits: no LLM call, no cost recorded, generated with zero', async () => {
+  let llmCalled = false;
+  const llm = createStubLlmClient(() => {
+    llmCalled = true;
+    return validReply;
+  });
+  const { ctx, rec } = makeContext({ llm });
+  const emptySurface: PerceivedSurface = {
+    endpoints: [],
+    authFlows: [],
+    stats: { endpointCount: 0, parameterizedCount: 0, authFlowCount: 0 },
+  };
+
+  const outcome = await hypothesize(ctx, { scanId: 's1', userId: 'u1', surface: emptySurface });
+
+  assert.equal(outcome.kind, 'generated');
+  if (outcome.kind === 'generated') assert.equal(outcome.inserted.length, 0);
+  assert.equal(llmCalled, false); // never spent an LLM call on an empty surface
+  assert.equal(rec.calls.length, 0); // and no cost row
+});

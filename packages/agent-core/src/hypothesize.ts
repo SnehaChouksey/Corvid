@@ -18,6 +18,13 @@ export async function hypothesize(
   ctx: HypothesizeContext,
   input: HypothesizeInput,
 ): Promise<HypothesizeOutcome> {
+  // 0. An empty surface has nothing to hypothesize — short-circuit BEFORE spending an LLM call, so a
+  //    target with no discoverable endpoints never burns a billed call against the daily cap.
+  if (input.surface.endpoints.length === 0) {
+    ctx.logger?.info({ scanId: input.scanId }, 'hypothesize skipped: empty surface (no endpoints)');
+    return { kind: 'generated', inserted: [], deduped: 0 };
+  }
+
   // 1. Spend hard-stop (fail closed): refuse before spending if the daily cap is reached.
   const since = utcDayStart(ctx.now());
   const spent = await ctx.dailySpend(input.userId, since);

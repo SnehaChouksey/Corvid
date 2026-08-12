@@ -62,6 +62,10 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
         });
         return { status: 'testing' as const, approvedHypotheses: [...decision.approvedHypotheses] };
       })
+      // Terminal for the non-approval branch: record a real lifecycle state so a scan that ended via
+      // a generation error or the spend stop reads `stopped` (not a stale `hypothesizing`). The
+      // reason is already in `hypothesizeStatus`; the scan is re-runnable (hypothesize is replay-safe).
+      .addNode('markStopped', () => ({ status: 'stopped' as const }))
       .addNode('test', () => ({ status: 'reporting' as const }))
       .addNode('report', () => ({ status: 'completed' as const }))
       .addEdge(START, 'authorize')
@@ -74,8 +78,9 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
       .addConditionalEdges(
         'hypothesize',
         (state) => (state.hypothesizeStatus === 'generated' ? 'generated' : 'stop'),
-        { generated: 'plan', stop: END },
+        { generated: 'plan', stop: 'markStopped' },
       )
+      .addEdge('markStopped', END)
       .addEdge('plan', 'awaitApproval')
       .addEdge('awaitApproval', 'test')
       .addEdge('test', 'report')

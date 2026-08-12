@@ -28,6 +28,20 @@ test('perceive merges duplicate method+url endpoints and unions their params', (
   assert.equal(surface.stats.authFlowCount, 1);
 });
 
+test('perceive keeps the most informative source when merging duplicate endpoints', () => {
+  const surface = perceive({
+    endpoints: [
+      { url: 'https://a.example.com/x', method: 'GET', source: 'link', params: [] },
+      { url: 'https://a.example.com/x', method: 'GET', source: 'xhr', params: [] },
+    ],
+    authFlows: [],
+    stats: { pagesVisited: 1, endpointsFound: 2, skippedOutOfScope: 0 },
+  });
+  assert.equal(surface.endpoints.length, 1);
+  // xhr (a real request) is kept over link, even though link was discovered first.
+  assert.equal(surface.endpoints[0]?.source, 'xhr');
+});
+
 test('perceive on an empty crawl map yields an empty surface', () => {
   const surface = perceive({
     endpoints: [],

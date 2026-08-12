@@ -49,6 +49,7 @@ test('a generation error ends the run without an approval gate', async () => {
 
   assert.equal((result as { __interrupt__?: readonly unknown[] }).__interrupt__, undefined);
   assert.equal((result as { hypothesizeStatus?: string }).hypothesizeStatus, 'generation_error');
+  assert.equal((result as { status?: string }).status, 'stopped'); // terminal lifecycle state, not a stale 'hypothesizing'
   const snap = await graph.getState(cfg);
   assert.deepEqual(snap.next, []); // finished — no pending node
 });
@@ -70,6 +71,7 @@ test('a spend stop ends the run without reaching plan or approval', async () => 
   assert.equal((result as { __interrupt__?: readonly unknown[] }).__interrupt__, undefined);
   assert.equal(planCalled, false);
   assert.equal((result as { hypothesizeStatus?: string }).hypothesizeStatus, 'spend_stopped');
+  assert.equal((result as { status?: string }).status, 'stopped');
 });
 
 test('the graph threads scanId/userId and the perceived surface into hypothesize', async () => {

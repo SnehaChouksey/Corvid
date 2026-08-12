@@ -11,7 +11,11 @@ export type ScanStatus =
   | 'reporting'
   | 'completed'
   | 'rejected'
-  | 'cancelled';
+  | 'cancelled'
+  // The run ended before the approval gate without a terminal outcome — a generation error or the
+  // daily LLM spend stop (ADR-21, `01` §12). Re-runnable: hypothesize is replay-safe; the specific
+  // reason rides on the scan-runtime `hypothesizeStatus`. Not "active" for the concurrent-scan cap.
+  | 'stopped';
 
 export type HypothesisStatus =
   | 'pending'
