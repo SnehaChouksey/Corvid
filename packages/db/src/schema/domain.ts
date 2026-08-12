@@ -1,5 +1,5 @@
 import type { HypothesisStatus, ScanStatus, VulnClass } from '@corvid/tool-contracts';
-import { boolean, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 import { users } from './auth.ts';
 
@@ -83,3 +83,41 @@ export const auditLog = pgTable('audit_log', {
   detail: text('detail'),
   timestamp: timestamp('timestamp', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Per-call LLM spend ledger (ADR-21). Each hypothesize/report LLM call writes one row at the call
+// site; the daily hard-stop (global + per-user, D-12) sums these rows for the current UTC day — the
+// kill-switch reads the same rows it writes, so there is no separate meter to drift. Not in the
+// original §5 ERD: this table implements ADR-21's "record cost at the call site".
+//
+// `user_id` is denormalized (not only reachable via scan → owner) so the per-user cap is a direct
+// sum and a scan deletion can't erase a user's spend. `scan_id`/`user_id` are plain FKs (no cascade)
+// — like `audit_log`, spend history is accounting that outlives the scan.
+export const llmCalls = pgTable(
+  'llm_calls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scanId: uuid('scan_id')
+      .notNull()
+      .references(() => scans.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    // Which reasoning call site (ADR-23). Inline union keeps @corvid/db decoupled from @corvid/llm.
+    purpose: text('purpose').$type<'hypothesize' | 'report'>().notNull(),
+    // Resolved model slug, for per-model cost analysis in Unit 8. Not a secret.
+    model: text('model').notNull(),
+    // OpenRouter `usage.cost` in credits. NULL when the gateway didn't report it — e.g. BYOK, where
+    // upstream inference is billed to the provider key, so the credit cap under-counts BYOK (tracked).
+    costCredits: numeric('cost_credits', { precision: 12, scale: 6 }),
+    promptTokens: integer('prompt_tokens').notNull().default(0),
+    completionTokens: integer('completion_tokens').notNull().default(0),
+    totalTokens: integer('total_tokens').notNull().default(0),
+    isByok: boolean('is_byok').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Daily rollups: global by day, and per-user by day.
+    index('llm_calls_created_at_idx').on(table.createdAt),
+    index('llm_calls_user_created_at_idx').on(table.userId, table.createdAt),
+  ],
+);

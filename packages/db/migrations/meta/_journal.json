@@ -22,6 +22,13 @@
       "when": 1786366070293,
       "tag": "0002_audit_immutable_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786537864623,
+      "tag": "0003_add_llm_calls",
+      "breakpoints": true
     }
   ]
 }
