@@ -1,5 +1,16 @@
-import type { HypothesisStatus, ScanStatus, VulnClass } from '@corvid/tool-contracts';
-import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import type { HypothesisPlan, HypothesisStatus, ScanStatus, VulnClass } from '@corvid/tool-contracts';
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { users } from './auth.ts';
 
@@ -41,19 +52,31 @@ export const scans = pgTable('scans', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const hypotheses = pgTable('hypotheses', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  scanId: uuid('scan_id')
-    .notNull()
-    .references(() => scans.id, { onDelete: 'cascade' }),
-  vulnClass: text('vuln_class').$type<VulnClass>().notNull(),
-  endpoint: text('endpoint').notNull(),
-  rationale: text('rationale').notNull(),
-  // Redis dedup cache keys on this (D-10, ADR-D10).
-  fingerprint: text('fingerprint').notNull(),
-  status: text('status').$type<HypothesisStatus>().notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const hypotheses = pgTable(
+  'hypotheses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scanId: uuid('scan_id')
+      .notNull()
+      .references(() => scans.id, { onDelete: 'cascade' }),
+    vulnClass: text('vuln_class').$type<VulnClass>().notNull(),
+    endpoint: text('endpoint').notNull(),
+    rationale: text('rationale').notNull(),
+    // Redis dedup cache keys on this (D-10, ADR-D10); the unique index below is the durable dedup.
+    fingerprint: text('fingerprint').notNull(),
+    status: text('status').$type<HypothesisStatus>().notNull(),
+    // Structured test plan (method/param/payload family; extended by the plan node + Unit 4/5 with
+    // the concrete tool/payload/intended payload shown at the approval gate, `02` §6). Validated at
+    // the service layer (agent core) via `hypothesisPlanSchema`; stored typed here.
+    plan: jsonb('plan').$type<HypothesisPlan>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Durable per-scan dedup (D-10/ADR-D10): a hypothesize node that re-runs on resume (ADR-27)
+    // upserts with onConflictDoNothing on this key, so a replay never double-inserts.
+    uniqueIndex('hypotheses_scan_id_fingerprint_key').on(table.scanId, table.fingerprint),
+  ],
+);
 
 export const findings = pgTable('findings', {
   id: uuid('id').primaryKey().defaultRandom(),

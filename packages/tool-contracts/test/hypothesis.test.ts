@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   hypothesisCandidateSchema,
   hypothesisGenerationSchema,
+  hypothesisPlanSchema,
   vulnClassSchema,
 } from '../src/index.ts';
 
@@ -64,4 +65,15 @@ test('generation schema rejects a batch with any malformed candidate (fail close
     hypotheses: [validCandidate, { ...validCandidate, vulnClass: 'nope' }],
   });
   assert.equal(result.success, false);
+});
+
+test('hypothesisPlanSchema accepts a v1 plan and rejects an unknown method or empty family', () => {
+  const plan = hypothesisPlanSchema.parse({
+    method: 'POST',
+    param: { name: 'q', location: 'query' },
+    payloadFamily: 'sql-error',
+  });
+  assert.equal(plan.method, 'POST');
+  assert.equal(hypothesisPlanSchema.safeParse({ method: 'FETCH', payloadFamily: 'x' }).success, false);
+  assert.equal(hypothesisPlanSchema.safeParse({ method: 'GET', payloadFamily: '' }).success, false);
 });

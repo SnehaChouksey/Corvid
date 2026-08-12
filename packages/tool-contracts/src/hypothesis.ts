@@ -50,3 +50,19 @@ export const hypothesisGenerationSchema = z
   })
   .strict();
 export type HypothesisGeneration = z.infer<typeof hypothesisGenerationSchema>;
+
+/**
+ * The structured test plan persisted on a hypothesis (the `plan` jsonb column). At hypothesize time
+ * it carries the fingerprint inputs that aren't their own columns (method, param, payload family);
+ * the `plan` node and Unit 4/5 extend it additively (the concrete tool, payload, and the
+ * human-readable intended payload shown at the approval gate — `02` §6). Validated where written
+ * (agent core) and stored as a typed object in @corvid/db.
+ */
+export const hypothesisPlanSchema = z
+  .object({
+    method: httpMethodSchema,
+    param: paramSchema.optional(),
+    payloadFamily: z.string().min(1),
+  })
+  .strict();
+export type HypothesisPlan = z.infer<typeof hypothesisPlanSchema>;
