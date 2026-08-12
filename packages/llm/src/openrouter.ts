@@ -12,17 +12,24 @@ import type { LlmClient, LlmCost, LlmMessage, LlmPurpose, LlmResult } from './ty
 
 /** purpose -> model slug. The default string appears in exactly this one place in the repo (ADR-23). */
 export const DEFAULT_MODELS: Readonly<Record<LlmPurpose, string>> = {
-  hypothesize: 'google/gemini-2.5-flash',
-  report: 'google/gemini-2.5-flash',
+  hypothesize: 'google/gemini-2.5-flash-lite',
+  report: 'google/gemini-2.5-flash-lite',
 };
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
+
+// Bound the completion so OpenRouter doesn't default to the model's full context (tens of thousands
+// of tokens), which fails a low-balance / credit-capped account with a 402. A hypothesis batch or a
+// report fits comfortably; the app can raise it per purpose.
+const DEFAULT_MAX_TOKENS = 4096;
 
 export interface OpenRouterConfig {
   readonly apiKey: string;
   /** purpose -> slug override; merged over DEFAULT_MODELS. Lets the app pin a model via env (ADR-23). */
   readonly models?: Partial<Record<LlmPurpose, string>>;
   readonly baseUrl?: string;
+  /** Max completion tokens per call (default 4096). Bounds spend and avoids the low-balance 402. */
+  readonly maxTokens?: number;
   /** Optional OpenRouter attribution headers. */
   readonly referer?: string;
   readonly title?: string;
@@ -95,6 +102,7 @@ export function createOpenRouterClient(config: OpenRouterConfig, deps: OpenRoute
       const body = {
         model,
         messages,
+        max_tokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
         usage: { include: true }, // opt in to per-call cost (ADR-21)
         response_format: responseFormat(schema),
       };

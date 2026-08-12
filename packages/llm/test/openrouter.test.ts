@@ -50,6 +50,7 @@ test('extracts validated data and per-call cost, and sends the cost opt-in + the
   const sent = JSON.parse(String(call.init.body)) as Record<string, unknown>;
   assert.equal(sent.model, DEFAULT_MODELS.hypothesize); // slug from the llm package, not the caller
   assert.deepEqual(sent.usage, { include: true }); // ADR-21 cost opt-in
+  assert.equal(sent.max_tokens, 4096); // bounded so a low-balance account doesn't 402
   const headers = call.init.headers as Record<string, string>;
   assert.equal(headers.Authorization, 'Bearer sk-test');
 });
