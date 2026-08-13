@@ -4,17 +4,18 @@ import { test } from 'node:test';
 import { createHttpSend, type FetchRequest, type HttpSendPorts } from '@corvid/http-send';
 import type { HttpResponse } from '@corvid/tool-contracts';
 
-import { injectionFuzz } from '../src/index.ts';
+import { idorCompare, injectionFuzz, jwtMutateTest } from '../src/index.ts';
 
-// Opt-in real-target integration test against a local OWASP Juice Shop — proof the testers gather a
+// Opt-in real-target integration tests against a local OWASP Juice Shop — proof the testers gather a
 // real signal, not just a fake one. To run:
 //   docker run -d -p 3000:3000 bkimminich/juice-shop
 //   JUICESHOP_URL=http://localhost:3000 node --test   (from packages/testers)
-// It drives the REAL http.send with a real fetch (in-memory scope/dedup — no DB/E2B needed for a
-// local lab you own) against the SQLi-vulnerable product search, and asserts the error-based signal
-// AND the false-positive guard (the neutralized control must NOT error).
+// Each test drives the REAL http.send with a real fetch (in-memory scope/dedup — no DB/E2B needed
+// for a local lab you own) against a genuinely vulnerable endpoint.
 
 const JUICESHOP_URL = process.env.JUICESHOP_URL;
+const DUMMY_SCAN = '00000000-0000-4000-8000-000000000000';
+const PASSWORD = 'Passw0rd!1';
 
 async function realFetch(req: FetchRequest): Promise<HttpResponse> {
   const startedAt = Date.now();
@@ -44,32 +45,76 @@ function localSender(baseUrl: string): ReturnType<typeof createHttpSend>['send']
   return createHttpSend(ports).send;
 }
 
+/** Register (idempotent — ignores "already exists") then log in, returning the JWT + basket id. */
+async function login(baseUrl: string, email: string): Promise<{ token: string; bid: number }> {
+  await fetch(`${baseUrl}/api/Users`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: PASSWORD, passwordRepeat: PASSWORD, securityQuestion: { id: 2 }, securityAnswer: 'cat' }),
+  }).catch(() => undefined);
+  const res = await fetch(`${baseUrl}/rest/user/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: PASSWORD }),
+  });
+  const json = (await res.json()) as { authentication: { token: string; bid: number } };
+  return { token: json.authentication.token, bid: json.authentication.bid };
+}
+
 if (JUICESHOP_URL === undefined) {
-  test('juice-shop injection integration (skipped — set JUICESHOP_URL to run)', { skip: true }, () => {});
+  test('juice-shop integration (skipped — set JUICESHOP_URL to run)', { skip: true }, () => {});
 } else {
   const baseUrl = JUICESHOP_URL;
+
   test('injection.fuzz elicits a real error-based SQLi signal, and the control does not error', async () => {
     const send = localSender(baseUrl);
     const outcome = await injectionFuzz(send, {
-      target: {
-        scanId: '00000000-0000-4000-8000-000000000000',
-        url: `${baseUrl}/rest/products/search?q=apple`,
-        method: 'GET',
-      },
+      target: { scanId: DUMMY_SCAN, url: `${baseUrl}/rest/products/search?q=apple`, method: 'GET' },
       param: { name: 'q', location: 'query' },
     });
 
     assert.equal(outcome.kind, 'observed');
     if (outcome.kind !== 'observed') return;
-
-    // At least one metacharacter payload elicits a DB error — the real SQLi signal.
     const errored = outcome.observation.attempts.filter((a) => a.matchedErrorPatterns.length > 0);
     assert.ok(errored.length > 0, 'expected at least one payload to elicit a DB error');
     assert.ok(errored.every((a) => a.injectionClass === 'sqli_error'), 'errors should come only from error-based payloads');
-
-    // The neutralized control must NOT error — the false-positive guard the verifier relies on.
     const control = outcome.observation.attempts.find((a) => a.payloadFamily === 'escaped-control');
     assert.ok(control, 'expected an escaped-control attempt');
-    assert.deepEqual(control?.matchedErrorPatterns, []);
+    assert.deepEqual(control?.matchedErrorPatterns, []); // the false-positive guard
+  });
+
+  test('jwt.mutate_test gathers the three-way auth-state signal on a real JWT oracle', async () => {
+    const send = localSender(baseUrl);
+    const a = await login(baseUrl, 'corvid-a@test.local');
+    // /rest/basket/{bid} is a clean oracle: 401 with no token, 200 with a valid one.
+    const outcome = await jwtMutateTest(send, {
+      target: { scanId: DUMMY_SCAN, url: `${baseUrl}/rest/basket/${a.bid}`, method: 'GET' },
+      sampleJwt: a.token,
+    });
+
+    assert.equal(outcome.kind, 'observed');
+    if (outcome.kind !== 'observed') return;
+    // The oracle must distinguish sessions (the D-13 precondition): no-token ≠ valid-token.
+    assert.equal(outcome.observation.noToken.status, 401);
+    assert.equal(outcome.observation.validToken.status, 200);
+    assert.ok(outcome.observation.mutations.some((m) => m.kind === 'alg_none'), 'expected the alg:none forgery to be attempted');
+  });
+
+  test('idor.compare shows a low-privilege session reaching another user’s resource', async () => {
+    const send = localSender(baseUrl);
+    const attacker = await login(baseUrl, 'corvid-a@test.local');
+    const victim = await login(baseUrl, 'corvid-b@test.local');
+    const outcome = await idorCompare(send, {
+      target: { scanId: DUMMY_SCAN, url: `${baseUrl}/rest/basket/${victim.bid}`, method: 'GET' },
+      lowPrivilege: { headers: { authorization: `Bearer ${attacker.token}` } },
+      highPrivilege: { headers: { authorization: `Bearer ${victim.token}` } },
+    });
+
+    assert.equal(outcome.kind, 'observed');
+    if (outcome.kind !== 'observed') return;
+    // The attacker (low-priv) gets a 200 on the victim's basket — the same as the owner. The verifier
+    // (Unit 5) turns "attacker reached the victim's object" into a confirmed IDOR; the tester records it.
+    assert.equal(outcome.observation.lowPrivilege.status, 200);
+    assert.equal(outcome.observation.highPrivilege.status, 200);
   });
 }
