@@ -9,7 +9,9 @@ import type { HttpResponse, HttpSendOutput, ResponseSignal } from '@corvid/tool-
 export function computeSignal(response: HttpResponse): ResponseSignal {
   return {
     status: response.status,
-    bodyLength: response.body.length,
+    // Byte length (not `.length`, which counts UTF-16 code units) so a multibyte body doesn't skew
+    // the size-delta discriminator the verifier reads.
+    bodyLength: Buffer.byteLength(response.body, 'utf8'),
     timingMs: response.timingMs,
     bodyHash: createHash('sha256').update(response.body).digest('hex'),
   };

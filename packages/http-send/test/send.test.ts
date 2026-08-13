@@ -33,10 +33,9 @@ function makeSender(opts: {
   const seen = opts.seen ?? new Set<string>();
   const ports: HttpSendPorts = {
     resolveTarget: async () => ('target' in opts ? opts.target : { scope: SCOPE, authorized: true }),
-    markNewRequest: async (_scanId, key) => {
-      if (seen.has(key)) return false;
+    alreadySent: async (_scanId, key) => seen.has(key),
+    markSent: async (_scanId, key) => {
       seen.add(key);
-      return true;
     },
     fetch: async (req) => {
       rec.fetched.push(req);
@@ -103,6 +102,32 @@ test('same URL with different auth headers is NOT deduped (JWT/IDOR need this)',
   assert.equal((second as { outcome: string }).outcome, 'sent'); // different auth → a distinct request
   assert.equal((noAuth as { outcome: string }).outcome, 'sent');
   assert.equal(rec.fetched.length, 3);
+});
+
+test('a send that THROWS is not marked sent, so a replay re-sends it (no dropped payload)', async () => {
+  const seen = new Set<string>();
+  let calls = 0;
+  const ports = {
+    resolveTarget: async () => ({ scope: SCOPE, authorized: true }),
+    alreadySent: async (_s: string, key: string) => seen.has(key),
+    markSent: async (_s: string, key: string) => {
+      seen.add(key);
+    },
+    fetch: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('egress reset mid-send');
+      return { status: 200, headers: {}, body: 'ok', timingMs: 5 };
+    },
+    audit: async () => {},
+    sleep: async () => {},
+    now: () => 1_000_000,
+  } satisfies Parameters<typeof createHttpSend>[0];
+  const send = createHttpSend(ports).send;
+
+  await assert.rejects(send(inScope)); // first attempt: fetch throws → NOT marked
+  const retry = await send(inScope); // replay: not deduped, actually re-sends
+  assert.equal((retry as { outcome: string }).outcome, 'sent');
+  assert.equal(calls, 2);
 });
 
 test('a throttle response grows the next min-delay (adaptive backoff, D-2)', async () => {

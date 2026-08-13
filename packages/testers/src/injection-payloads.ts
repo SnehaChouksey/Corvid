@@ -40,31 +40,37 @@ export function matchDbErrors(body: string): string[] {
   return DB_ERROR_PATTERNS.filter((p) => p.re.test(body)).map((p) => p.name);
 }
 
-export interface InjectedRequest {
-  readonly url: string;
-  readonly body?: string;
-}
+export type InjectResult =
+  | { readonly ok: true; readonly url: string; readonly body?: string }
+  | { readonly ok: false; readonly reason: string };
 
-/** Place `value` into `param`. Query → the URL search param; body → a JSON key; path → falls back to query. */
+/**
+ * Place `value` into `param`. Query → the URL search param; body → a JSON key. Returns `ok:false`
+ * for cases v1 cannot inject faithfully rather than testing the WRONG location and reporting a
+ * false-negative-shaped clean result: a `path` param (the sink is a path segment, not a query) and a
+ * non-JSON request body (fabricating a JSON body would drop the real fields + content type).
+ */
 export function injectPayload(
   baseUrl: string,
   baseBody: string | undefined,
   param: CrawledParam,
   value: string,
-): InjectedRequest {
+): InjectResult {
+  if (param.location === 'path') {
+    return { ok: false, reason: 'path-parameter injection not supported in v1' };
+  }
   if (param.location === 'body') {
     let obj: Record<string, unknown> = {};
     if (baseBody !== undefined) {
       try {
         obj = JSON.parse(baseBody) as Record<string, unknown>;
       } catch {
-        obj = {};
+        return { ok: false, reason: 'non-JSON request body injection not supported in v1' };
       }
     }
-    return { url: baseUrl, body: JSON.stringify({ ...obj, [param.name]: value }) };
+    return { ok: true, url: baseUrl, body: JSON.stringify({ ...obj, [param.name]: value }) };
   }
-  // query (and a best-effort for path): set the search param.
   const url = new URL(baseUrl);
   url.searchParams.set(param.name, value);
-  return baseBody !== undefined ? { url: url.toString(), body: baseBody } : { url: url.toString() };
+  return baseBody !== undefined ? { ok: true, url: url.toString(), body: baseBody } : { ok: true, url: url.toString() };
 }

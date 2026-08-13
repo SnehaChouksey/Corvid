@@ -43,7 +43,12 @@ export function createHttpSendPorts(deps: HttpSendAdapterDeps): HttpSendPorts {
       // parseScopeRules is the ONE authoritative, fail-closed scope validator (rejects dangerous hosts).
       return { scope: parseScopeRules(row.scopeRules), authorized: row.authorizationConfirmedAt !== null };
     },
-    markNewRequest: (scanId, key) => deps.dedupFor(scanId).markNew(key),
+    alreadySent: (scanId, key) => deps.dedupFor(scanId).has(key),
+    markSent: (scanId, key) =>
+      deps
+        .dedupFor(scanId)
+        .markSent(key)
+        .then(() => undefined),
     fetch: deps.fetchImpl ?? realFetch,
     audit: (entry) =>
       appendAudit(deps.db, {

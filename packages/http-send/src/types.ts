@@ -44,8 +44,10 @@ export const DEFAULT_RATE_CONFIG: RateConfig = {
 export interface HttpSendPorts {
   /** Resolve the scan's recorded scope + authorization from the target row (the ONE scope source). */
   resolveTarget(scanId: string): Promise<ResolvedTarget | undefined>;
-  /** Per-scan dedup: true if the request key is NEW (marks it), false if already sent. Fail-closed. */
-  markNewRequest(scanId: string, requestKey: string): Promise<boolean>;
+  /** Whether this request was already sent in this scan (checked BEFORE sending). Fail-closed. */
+  alreadySent(scanId: string, requestKey: string): Promise<boolean>;
+  /** Mark a request sent — called only AFTER a completed send, so a thrown send re-tries on replay. */
+  markSent(scanId: string, requestKey: string): Promise<void>;
   /** The actual network send — real `fetch` inside the E2B sandbox in prod; a fake in tests. */
   fetch(req: FetchRequest): Promise<HttpResponse>;
   audit(entry: HttpAuditEntry): Promise<void>;

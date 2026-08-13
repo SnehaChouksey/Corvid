@@ -14,9 +14,13 @@ export interface TesterTarget {
   readonly method: HttpMethod;
 }
 
-/** When http.send did not actually send (out-of-scope oracle, or an idempotent replay), a tester
- *  cannot observe — it surfaces this instead of fabricating a signal. */
+/** When a tester could not produce an observation — http.send did not actually send (out-of-scope
+ *  oracle or an idempotent replay), or the payload could not be placed (`unsupported`, e.g. a path
+ *  param or a non-JSON body in v1) — it surfaces this instead of fabricating a signal or, worse,
+ *  testing the wrong location and reporting a false-negative-shaped clean result. */
 export interface NotSent {
   readonly kind: 'not_sent';
-  readonly reason: 'refused_out_of_scope' | 'deduplicated';
+  readonly reason: 'refused_out_of_scope' | 'deduplicated' | 'unsupported';
+  /** Free-text detail for `unsupported` (safe metadata only). */
+  readonly detail?: string;
 }

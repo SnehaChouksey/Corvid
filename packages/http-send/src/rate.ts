@@ -15,5 +15,13 @@ export function nextDelayMs(currentDelayMs: number, status: number, config: Rate
     const grown = Math.max(config.baseDelayMs, currentDelayMs) * config.backoffMultiplier;
     return Math.min(config.maxDelayMs, grown);
   }
-  return config.baseDelayMs;
+  // Decay gently toward the base rather than snapping back on the first clean response — a WAF that
+  // intermittently returns 200 must not reset the learned backoff (D-2).
+  return Math.max(config.baseDelayMs, Math.floor(currentDelayMs / config.backoffMultiplier));
+}
+
+/** Grow the delay after a send that THREW (no status) — a failing target still earns backoff. */
+export function backoffAfterFailure(currentDelayMs: number, config: RateConfig): number {
+  const grown = Math.max(config.baseDelayMs, currentDelayMs) * config.backoffMultiplier;
+  return Math.min(config.maxDelayMs, grown);
 }

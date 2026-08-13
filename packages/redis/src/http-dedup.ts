@@ -20,15 +20,25 @@ export class HttpRequestDedup {
     this.key = `${NAMESPACE}:${scanId}:sent`;
   }
 
-  /** Mark a request key sent. Returns true if it was NEW (send it), false if already sent (skip). */
-  async markNew(requestKey: string): Promise<boolean> {
+  /** Whether a request key was already sent this scan. Checked BEFORE sending. Fail-closed. */
+  async has(requestKey: string): Promise<boolean> {
+    try {
+      return (await this.#redis.sismember(this.key, requestKey)) === 1;
+    } catch (cause) {
+      // Fail closed: if we can't tell whether it was sent, don't send (uncertainty ≠ a green light).
+      throw new InfraError('http-dedup has failed', { retryable: true, cause });
+    }
+  }
+
+  /** Mark a request key sent. Called AFTER a completed send, so a send that threw is re-tried on
+   *  replay (never silently dropped). Returns true if it was newly added. */
+  async markSent(requestKey: string): Promise<boolean> {
     try {
       const added = await this.#redis.sadd(this.key, requestKey);
       await this.#redis.expire(this.key, this.#ttlSeconds);
       return added === 1;
     } catch (cause) {
-      // Fail closed: uncertainty about "already sent?" must not lead to a send.
-      throw new InfraError('http-dedup markNew failed', { retryable: true, cause });
+      throw new InfraError('http-dedup markSent failed', { retryable: true, cause });
     }
   }
 

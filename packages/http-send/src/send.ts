@@ -4,7 +4,7 @@ import { AuthorizationError } from '@corvid/errors';
 import { isUrlInScope } from '@corvid/scope';
 import type { HttpSendInput, HttpSendOutput } from '@corvid/tool-contracts';
 
-import { nextDelayMs } from './rate.ts';
+import { backoffAfterFailure, nextDelayMs } from './rate.ts';
 import { DEFAULT_RATE_CONFIG, type FetchRequest, type HttpSender, type HttpSendPorts } from './types.ts';
 
 // The one enforced order (Unit 4, ADR-24/25). Each guard runs BEFORE any network I/O except the
@@ -26,13 +26,17 @@ function requestKey(
   headers: Record<string, string> | undefined,
   body: string | undefined,
 ): string {
+  // JSON-encode the sorted [name, value] pairs so the canonical form is INJECTIVE — a header value
+  // containing a separator/newline can't be confused with a field boundary (two distinct header sets
+  // could otherwise collide and wrongly dedup the JWT/IDOR case).
   const canonicalHeaders =
     headers === undefined
       ? ''
-      : Object.entries(headers)
-          .map(([k, v]) => `${k.toLowerCase()}=${v}`)
-          .sort()
-          .join('\n');
+      : JSON.stringify(
+          Object.entries(headers)
+            .map(([k, v]): [string, string] => [k.toLowerCase(), v])
+            .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+        );
   return createHash('sha256')
     .update([method.toUpperCase(), url, canonicalHeaders, body ?? ''].join(FIELD_SEP))
     .digest('hex');
@@ -78,10 +82,11 @@ export function createHttpSend(ports: HttpSendPorts): HttpSender {
         return { outcome: 'refused_out_of_scope' };
       }
 
-      // 3. Dedup (ADR-27): a replayed node's identical request is not re-sent. Fail-closed in the port.
+      // 3. Dedup (ADR-27): a request already sent this scan is not re-sent. Checked BEFORE sending;
+      //    the key is marked only AFTER a completed send (below), so a send that THROWS is re-tried
+      //    on replay rather than silently dropped — critical for a zero-false-negative product.
       const key = requestKey(input.method, input.url, input.headers, input.body);
-      const isNew = await ports.markNewRequest(input.scanId, key);
-      if (!isNew) {
+      if (await ports.alreadySent(input.scanId, key)) {
         await ports.audit({ scanId: input.scanId, action: 'http.send.deduplicated' });
         return { outcome: 'deduplicated' };
       }
@@ -103,9 +108,22 @@ export function createHttpSend(ports: HttpSendPorts): HttpSender {
         ...(input.headers !== undefined ? { headers: input.headers } : {}),
         ...(input.body !== undefined ? { body: input.body } : {}),
       };
-      const response = await ports.fetch(req);
 
-      rate.set(input.scanId, { delayMs: nextDelayMs(state.delayMs, response.status, config), lastSentAt: now() });
+      let response;
+      try {
+        response = await ports.fetch(req);
+      } finally {
+        // Advance the rate posture even when the send THREW (a failing/throttling target still earns
+        // backoff), so the next send is correctly spaced instead of firing immediately off stale state.
+        const nextDelay =
+          response !== undefined
+            ? nextDelayMs(state.delayMs, response.status, config)
+            : backoffAfterFailure(state.delayMs, config);
+        rate.set(input.scanId, { delayMs: nextDelay, lastSentAt: now() });
+      }
+
+      // Only now — after a completed send — is the request marked, so a thrown send re-tries on replay.
+      await ports.markSent(input.scanId, key);
       await ports.audit({ scanId: input.scanId, action: 'http.send.response', detail: `status=${response.status}` });
       return { outcome: 'sent', response };
     },

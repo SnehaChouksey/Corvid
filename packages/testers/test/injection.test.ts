@@ -14,12 +14,26 @@ const qParam = { name: 'q', location: 'query' as const };
 
 test('injectPayload places the value in the query param', () => {
   const r = injectPayload('https://app.example.com/api/search?q=abc', undefined, qParam, "'");
-  assert.equal(new URL(r.url).searchParams.get('q'), "'");
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(new URL(r.url).searchParams.get('q'), "'");
 });
 
-test('injectPayload places the value in a JSON body param', () => {
+test('injectPayload places the value in a JSON body param, preserving other fields', () => {
   const r = injectPayload('https://app.example.com/api/x', '{"q":"abc","page":1}', { name: 'q', location: 'body' }, "'");
-  assert.deepEqual(JSON.parse(r.body ?? '{}'), { q: "'", page: 1 });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.deepEqual(JSON.parse(r.body ?? '{}'), { q: "'", page: 1 });
+});
+
+test('injectPayload refuses a path param and a non-JSON body instead of mislocating', () => {
+  assert.equal(injectPayload('https://app.example.com/user/1', undefined, { name: 'id', location: 'path' }, "'").ok, false);
+  assert.equal(injectPayload('https://app.example.com/x', 'a=1&b=2', { name: 'a', location: 'body' }, "'").ok, false);
+});
+
+test('injection tester surfaces not_sent(unsupported) for a path param, never a clean-looking observation', async () => {
+  const anySend: SendFn = async () => ({ outcome: 'sent', response: { status: 200, headers: {}, body: 'x', timingMs: 1 } });
+  const outcome = await injectionFuzz(anySend, { target, param: { name: 'id', location: 'path' } });
+  assert.equal(outcome.kind, 'not_sent');
+  if (outcome.kind === 'not_sent') assert.equal(outcome.reason, 'unsupported');
 });
 
 test('matchDbErrors detects known signatures by name and ignores a clean body', () => {

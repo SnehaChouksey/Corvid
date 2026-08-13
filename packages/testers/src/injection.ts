@@ -21,16 +21,22 @@ export interface InjectionFuzzInput {
 
 export type InjectionOutcome = { readonly kind: 'observed'; readonly observation: InjectionObservation } | NotSent;
 
+// A neutral, metacharacter-free value used to establish the baseline. The baseline must supply the
+// param (so it hits the SAME code path as the injected requests); a param-absent baseline could take
+// a different branch (e.g. 400 missing-param) and defeat the verifier's control-vs-baseline guard.
+const BENIGN_VALUE = 'corvidbaseline1';
+
 export async function injectionFuzz(send: SendFn, input: InjectionFuzzInput): Promise<InjectionOutcome> {
   const { target, param } = input;
-  const baseReq = {
+
+  const benign = injectPayload(target.url, input.baseBody, param, BENIGN_VALUE);
+  if (!benign.ok) return { kind: 'not_sent', reason: 'unsupported', detail: benign.reason };
+  const baselineOut = await send({
     scanId: target.scanId,
     method: target.method,
-    url: target.url,
-    ...(input.baseBody !== undefined ? { body: input.baseBody } : {}),
-  };
-
-  const baselineOut = await send(baseReq);
+    url: benign.url,
+    ...(benign.body !== undefined ? { body: benign.body } : {}),
+  });
   if (baselineOut.outcome !== 'sent') return { kind: 'not_sent', reason: baselineOut.outcome };
   const baseline = computeSignal(baselineOut.response);
 
@@ -41,6 +47,7 @@ export async function injectionFuzz(send: SendFn, input: InjectionFuzzInput): Pr
   const attempts: InjectionObservation['attempts'][number][] = [];
   for (const payload of selected) {
     const injected = injectPayload(target.url, input.baseBody, param, payload.value);
+    if (!injected.ok) return { kind: 'not_sent', reason: 'unsupported', detail: injected.reason };
     const out = await send({
       scanId: target.scanId,
       method: target.method,

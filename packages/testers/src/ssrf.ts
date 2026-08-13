@@ -29,6 +29,7 @@ export async function ssrfCheck(send: SendFn, oob: OobRegistrar, input: SsrfChec
   const payloadUrl = `http://${token}.${host}/`;
 
   const injected = injectPayload(target.url, input.baseBody, param, payloadUrl);
+  if (!injected.ok) return { kind: 'not_sent', reason: 'unsupported', detail: injected.reason };
   const out = await send({
     scanId: target.scanId,
     method: target.method,
