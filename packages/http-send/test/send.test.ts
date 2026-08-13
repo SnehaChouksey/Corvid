@@ -95,6 +95,16 @@ test('a duplicate request in the same scan is not re-sent (replay-safe)', async 
   assert.equal(rec.fetched.length, 1); // only the first actually went out
 });
 
+test('same URL with different auth headers is NOT deduped (JWT/IDOR need this)', async () => {
+  const { send, rec } = makeSender({});
+  await send({ ...inScope, headers: { authorization: 'Bearer token-A' } });
+  const second = await send({ ...inScope, headers: { authorization: 'Bearer token-B' } });
+  const noAuth = await send({ ...inScope }); // no token at all
+  assert.equal((second as { outcome: string }).outcome, 'sent'); // different auth → a distinct request
+  assert.equal((noAuth as { outcome: string }).outcome, 'sent');
+  assert.equal(rec.fetched.length, 3);
+});
+
 test('a throttle response grows the next min-delay (adaptive backoff, D-2)', async () => {
   const { send, rec } = makeSender({ response: { status: 429, headers: {}, body: '', timingMs: 1 } });
   // First send: no prior state, wait 0. The 429 grows the stored delay.

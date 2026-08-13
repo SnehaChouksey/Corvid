@@ -11,9 +11,31 @@ import { DEFAULT_RATE_CONFIG, type FetchRequest, type HttpSender, type HttpSendP
 // send itself; every branch is audited (ADR-16). A tool never decides "verified" — this returns the
 // raw response observation and the gate (Unit 5) decides.
 
-/** Stable per-scan dedup key: method + full url + body. Identical requests collapse (idempotent replay). */
-function requestKey(method: string, url: string, body: string | undefined): string {
-  return createHash('sha256').update([method.toUpperCase(), url, body ?? ''].join('')).digest('hex');
+// ASCII Unit Separator between fields so no field's contents can be mistaken for a boundary.
+const FIELD_SEP = String.fromCharCode(0x1f);
+
+/**
+ * Stable per-scan dedup key: method + full url + canonical headers + body. Headers ARE included —
+ * two requests to the same URL that differ only in auth (JWT/IDOR testing) are DIFFERENT tests and
+ * must not collapse; an identical replay (same headers) still collapses (idempotent, ADR-27). The
+ * whole key is hashed, so a token carried in a header is never stored in the clear.
+ */
+function requestKey(
+  method: string,
+  url: string,
+  headers: Record<string, string> | undefined,
+  body: string | undefined,
+): string {
+  const canonicalHeaders =
+    headers === undefined
+      ? ''
+      : Object.entries(headers)
+          .map(([k, v]) => `${k.toLowerCase()}=${v}`)
+          .sort()
+          .join('\n');
+  return createHash('sha256')
+    .update([method.toUpperCase(), url, canonicalHeaders, body ?? ''].join(FIELD_SEP))
+    .digest('hex');
 }
 
 /** Method + origin + path only — NEVER the query or body (may carry secrets/tokens, §5). */
@@ -57,7 +79,7 @@ export function createHttpSend(ports: HttpSendPorts): HttpSender {
       }
 
       // 3. Dedup (ADR-27): a replayed node's identical request is not re-sent. Fail-closed in the port.
-      const key = requestKey(input.method, input.url, input.body);
+      const key = requestKey(input.method, input.url, input.headers, input.body);
       const isNew = await ports.markNewRequest(input.scanId, key);
       if (!isNew) {
         await ports.audit({ scanId: input.scanId, action: 'http.send.deduplicated' });
