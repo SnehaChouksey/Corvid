@@ -16,6 +16,10 @@ export interface InjectionPayload {
 export const INJECTION_PAYLOADS: readonly InjectionPayload[] = [
   { injectionClass: 'sqli_error', family: 'single-quote', value: "'" },
   { injectionClass: 'sqli_error', family: 'double-quote', value: '"' },
+  // Break out of a parenthesized clause, e.g. `LIKE ('%…%')` — a bare quote inside parens is valid,
+  // so the query only errors once the parens are closed (found testing a real app).
+  { injectionClass: 'sqli_error', family: 'paren-breakout', value: "'))" },
+  { injectionClass: 'sqli_error', family: 'paren-breakout-single', value: "')" },
   { injectionClass: 'sqli_error', family: 'escaped-control', value: "''" },
   { injectionClass: 'sqli_time', family: 'pg-sleep-2s', value: "'||pg_sleep(2)--" },
   { injectionClass: 'sqli_time', family: 'pg-sleep-4s', value: "'||pg_sleep(4)--" },
