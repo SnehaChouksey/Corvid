@@ -100,10 +100,18 @@ if (JUICESHOP_URL === undefined) {
     assert.ok(outcome.observation.mutations.some((m) => m.kind === 'alg_none'), 'expected the alg:none forgery to be attempted');
   });
 
-  test('idor.compare shows a low-privilege session reaching another user’s resource', async () => {
+  test('idor.compare — a low-priv session reads the victim’s ACTUAL basket, not merely a 200', async () => {
     const send = localSender(baseUrl);
     const attacker = await login(baseUrl, 'corvid-a@test.local');
     const victim = await login(baseUrl, 'corvid-b@test.local');
+    // Give the victim's basket a distinctive item so "A saw B's data" is unambiguous (idempotent-ish;
+    // a duplicate add just increases quantity).
+    await fetch(`${baseUrl}/api/BasketItems`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${victim.token}` },
+      body: JSON.stringify({ ProductId: 1, BasketId: victim.bid, quantity: 1 }),
+    }).catch(() => undefined);
+
     const outcome = await idorCompare(send, {
       target: { scanId: DUMMY_SCAN, url: `${baseUrl}/rest/basket/${victim.bid}`, method: 'GET' },
       lowPrivilege: { headers: { authorization: `Bearer ${attacker.token}` } },
@@ -112,9 +120,11 @@ if (JUICESHOP_URL === undefined) {
 
     assert.equal(outcome.kind, 'observed');
     if (outcome.kind !== 'observed') return;
-    // The attacker (low-priv) gets a 200 on the victim's basket — the same as the owner. The verifier
-    // (Unit 5) turns "attacker reached the victim's object" into a confirmed IDOR; the tester records it.
     assert.equal(outcome.observation.lowPrivilege.status, 200);
     assert.equal(outcome.observation.highPrivilege.status, 200);
+    // The load-bearing assertion: the attacker's response is BYTE-IDENTICAL to the owner's, so the
+    // attacker read the victim's real basket, not its own. Status 200 alone would not prove this.
+    assert.equal(outcome.observation.lowPrivilege.bodyHash, outcome.observation.highPrivilege.bodyHash);
+    assert.ok(outcome.observation.lowPrivilege.bodyLength > 0);
   });
 }
