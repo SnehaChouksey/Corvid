@@ -4,3 +4,5 @@ export * from './jwt-mutate.ts';
 export * from './jwt.ts';
 export * from './injection-payloads.ts';
 export * from './injection.ts';
+export * from './ssrf.ts';
+export * from './idor.ts';
