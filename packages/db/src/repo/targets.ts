@@ -40,3 +40,37 @@ export async function createTarget(db: Database, target: NewTarget): Promise<Tar
   }
   return row;
 }
+
+export interface TargetPatch {
+  readonly url?: string;
+  readonly scopeRules?: Record<string, unknown>;
+}
+
+/**
+ * Owner-scoped edit of a target's URL and/or scope rules. Any change to either INVALIDATES a prior
+ * authorization (`01` §3, §50): widening scope must never inherit an old approval, so the
+ * proof-of-control triplet (`authorization_confirmed_at`, `authorized_by`, `proof_of_control`) is
+ * cleared whenever url or scope changes and re-earned via the D-7 flow. Returns the updated row, or
+ * undefined if not owned (rendered 404, never 403 — ADR-19).
+ */
+export async function updateTargetForOwner(
+  db: Database,
+  ownerId: string,
+  targetId: string,
+  patch: TargetPatch,
+): Promise<TargetRow | undefined> {
+  const invalidatesAuth = patch.url !== undefined || patch.scopeRules !== undefined;
+  const rows = await db
+    .update(targets)
+    .set({
+      ...(patch.url !== undefined ? { url: patch.url } : {}),
+      ...(patch.scopeRules !== undefined ? { scopeRules: patch.scopeRules } : {}),
+      ...(invalidatesAuth
+        ? { authorizationConfirmedAt: null, authorizedBy: null, proofOfControl: null }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(targets.id, targetId), eq(targets.ownerId, ownerId)))
+    .returning();
+  return rows[0];
+}

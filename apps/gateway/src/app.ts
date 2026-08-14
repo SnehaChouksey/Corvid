@@ -1,5 +1,22 @@
 import { type Auth, resolveUserId } from '@corvid/auth';
-import { createScanWithinCap, createTarget, type Database, getTargetForOwner } from '@corvid/db';
+import {
+  type AuditRow,
+  createScanWithinCap,
+  createTarget,
+  type Database,
+  type FindingRow,
+  getAuditForScanOwner,
+  getScanForOwner,
+  getTargetForOwner,
+  type HypothesisRow,
+  listFindingsForScan,
+  listHypothesesForScan,
+  listScansForOwner,
+  listTargetsForOwner,
+  type ScanRow,
+  type TargetRow,
+  updateTargetForOwner,
+} from '@corvid/db';
 import { AuthorizationError, isCorvidError } from '@corvid/errors';
 import type { CorvidLogger } from '@corvid/logger';
 import { parseScopeRules } from '@corvid/scope';
@@ -50,6 +67,65 @@ export interface AppDeps {
 }
 
 export type AppEnv = { Variables: { userId: string } };
+
+// Response shaping — the mapping from a snake_case-backed DB row to the app's JSON happens here,
+// once (§11). These select the fields the dashboard reads and deliberately omit internals: a
+// hypothesis's `fingerprint` (dedup plumbing) and a target's raw `proof_of_control` token are not
+// surfaced. `findings` are verified-only by construction (the store holds no unverified row, §4.4),
+// so there is nothing to filter here — the DTO can't leak an unverified finding.
+
+function toTargetSummary(t: TargetRow) {
+  return {
+    id: t.id,
+    url: t.url,
+    scopeRules: t.scopeRules,
+    authorized: t.authorizationConfirmedAt !== null,
+    authorizationConfirmedAt: t.authorizationConfirmedAt,
+    authorizedBy: t.authorizedBy,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+  };
+}
+
+function toScanSummary(s: ScanRow) {
+  return {
+    id: s.id,
+    targetId: s.targetId,
+    status: s.status,
+    startedAt: s.startedAt,
+    completedAt: s.completedAt,
+    createdAt: s.createdAt,
+  };
+}
+
+function toHypothesis(h: HypothesisRow) {
+  // The approval gate reads this: vuln class, endpoint, rationale, and the intended payload/tool
+  // from `plan` (`01` §6, `02` §6). Status distinguishes pending/approved/rejected/tested.
+  return {
+    id: h.id,
+    vulnClass: h.vulnClass,
+    endpoint: h.endpoint,
+    rationale: h.rationale,
+    status: h.status,
+    plan: h.plan,
+    createdAt: h.createdAt,
+  };
+}
+
+function toFinding(f: FindingRow) {
+  return {
+    id: f.id,
+    vulnClass: f.vulnClass,
+    payload: f.payload,
+    proof: f.proof,
+    severity: f.severity,
+    reportedAt: f.reportedAt,
+  };
+}
+
+function toAuditEntry(a: AuditRow) {
+  return { id: a.id, action: a.action, actor: a.actor, detail: a.detail, timestamp: a.timestamp };
+}
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -118,17 +194,53 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     return c.json({ id: target.id }, 201);
   });
 
+  api.get('/targets', async (c) => {
+    const rows = await listTargetsForOwner(deps.db, c.get('userId'));
+    return c.json({ targets: rows.map(toTargetSummary) });
+  });
+
   api.get('/targets/:id', async (c) => {
     const userId = c.get('userId');
     const target = await getTargetForOwner(deps.db, userId, c.req.param('id'));
     if (target === undefined) {
       throw new HTTPException(404, { message: 'Not found' }); // 404-not-403 (ADR-19)
     }
-    return c.json({
-      id: target.id,
-      url: target.url,
-      authorizationConfirmedAt: target.authorizationConfirmedAt,
+    return c.json(toTargetSummary(target));
+  });
+
+  const patchTargetSchema = z
+    .object({
+      url: z.url().optional(),
+      scopeRules: z
+        .object({
+          hosts: z.array(z.string().min(1)).min(1),
+          includePaths: z.array(z.string()).optional(),
+          excludePaths: z.array(z.string()).optional(),
+        })
+        .optional(),
+    })
+    .strict()
+    .refine((v) => v.url !== undefined || v.scopeRules !== undefined, {
+      message: 'provide url and/or scopeRules to update',
     });
+
+  // Editing url or scope INVALIDATES a prior authorization (`01` §3): the repo clears the
+  // proof-of-control triplet so a widened scope can never inherit an old approval. The target
+  // returns to Unauthorized and must re-earn authorization via the D-7 flow.
+  api.patch('/targets/:id', zValidator('json', patchTargetSchema), async (c) => {
+    const userId = c.get('userId');
+    const body = c.req.valid('json');
+    if (body.scopeRules !== undefined) {
+      parseScopeRules(body.scopeRules); // reject invalid/dangerous scope before persisting → 403
+    }
+    const updated = await updateTargetForOwner(deps.db, userId, c.req.param('id'), {
+      ...(body.url !== undefined ? { url: body.url } : {}),
+      ...(body.scopeRules !== undefined ? { scopeRules: body.scopeRules } : {}),
+    });
+    if (updated === undefined) {
+      throw new HTTPException(404, { message: 'Not found' });
+    }
+    return c.json(toTargetSummary(updated));
   });
 
   const createScanSchema = z.object({ targetId: z.uuid() }).strict();
@@ -158,6 +270,48 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       return c.json({ error: 'concurrent_scan_cap_reached', cap: deps.limits.concurrentScanCap }, 429);
     }
     return c.json({ id: scan.id, status: scan.status }, 201);
+  });
+
+  api.get('/scans', async (c) => {
+    const rows = await listScansForOwner(deps.db, c.get('userId'));
+    return c.json({ scans: rows.map(toScanSummary) });
+  });
+
+  // Resolve a scan the caller owns, or 404 (never 403 — no cross-tenant existence leak, ADR-19).
+  // Every per-scan sub-resource read below gates on ownership HERE first, then reads the scan-scoped
+  // rows: the child repos (`listHypothesesForScan` etc.) are trusted-caller reads by scan id, so the
+  // owner check must happen at this boundary, not inside them.
+  const requireOwnedScan = async (c: Context<AppEnv>): Promise<ScanRow> => {
+    const scanId = c.req.param('id');
+    const scan =
+      scanId === undefined ? undefined : await getScanForOwner(deps.db, c.get('userId'), scanId);
+    if (scan === undefined) {
+      throw new HTTPException(404, { message: 'Not found' });
+    }
+    return scan;
+  };
+
+  api.get('/scans/:id', async (c) => {
+    const scan = await requireOwnedScan(c);
+    return c.json(toScanSummary(scan));
+  });
+
+  api.get('/scans/:id/hypotheses', async (c) => {
+    const scan = await requireOwnedScan(c);
+    const rows = await listHypothesesForScan(deps.db, scan.id);
+    return c.json({ hypotheses: rows.map(toHypothesis) });
+  });
+
+  api.get('/scans/:id/findings', async (c) => {
+    const scan = await requireOwnedScan(c);
+    const rows = await listFindingsForScan(deps.db, scan.id);
+    return c.json({ findings: rows.map(toFinding) });
+  });
+
+  api.get('/scans/:id/audit', async (c) => {
+    const scan = await requireOwnedScan(c);
+    const rows = await getAuditForScanOwner(deps.db, c.get('userId'), scan.id);
+    return c.json({ audit: rows.map(toAuditEntry) });
   });
 
   app.route('/api', api);

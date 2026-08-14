@@ -159,6 +159,97 @@ function runIntegrationTests(databaseUrl: string): void {
     assert.deepEqual(await capped.json(), { error: 'concurrent_scan_cap_reached', cap: 1 });
   });
 
+  async function createTarget(app: Hono<AppEnv>, cookie: string, host: string): Promise<string> {
+    const res = await app.request(
+      '/api/targets',
+      authed(cookie, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: `https://${host}`, scopeRules: { hosts: [host] } }),
+      }),
+    );
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  test('editing scope returns the target to Unauthorized (`01` §3, Unit 6)', async () => {
+    const app = makeApp(defaultLimits);
+    const cookie = await signUp(app, `patch-${Date.now()}@example.com`);
+    const id = await createTarget(app, cookie, 'patch.example.com');
+
+    // Stamp authorization directly (the D-7 flow lands in a later slab); the invariant under test is
+    // that a scope edit CLEARS it, regardless of how it was earned.
+    await handle.db
+      .update(schema.targets)
+      .set({ authorizationConfirmedAt: new Date(), authorizedBy: 'test', proofOfControl: { method: 'dns' } })
+      .where(eq(schema.targets.id, id));
+    const before = await app.request(`/api/targets/${id}`, authed(cookie));
+    assert.equal(((await before.json()) as { authorized: boolean }).authorized, true);
+
+    const patched = await app.request(
+      `/api/targets/${id}`,
+      authed(cookie, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ scopeRules: { hosts: ['patch.example.com', 'widened.example.com'] } }),
+      }),
+    );
+    assert.equal(patched.status, 200);
+    assert.equal(((await patched.json()) as { authorized: boolean }).authorized, false); // approval discarded
+
+    // The cleared authorization is durable: a scan can no longer start.
+    const scan = await app.request(
+      '/api/scans',
+      authed(cookie, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetId: id }),
+      }),
+    );
+    assert.equal(scan.status, 403);
+  });
+
+  test('scan sub-resources are 404 for a non-owner (no cross-tenant leak, ADR-19)', async () => {
+    const app = makeApp(defaultLimits);
+    const cookieA = await signUp(app, `owner-${Date.now()}@example.com`);
+    const cookieB = await signUp(app, `intruder-${Date.now()}@example.com`);
+    const id = await createTarget(app, cookieA, 'owned.example.com');
+    await handle.db
+      .update(schema.targets)
+      .set({ authorizationConfirmedAt: new Date() })
+      .where(eq(schema.targets.id, id));
+    const started = await app.request(
+      '/api/scans',
+      authed(cookieA, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetId: id }),
+      }),
+    );
+    const scanId = ((await started.json()) as { id: string }).id;
+
+    // Owner reads succeed; the intruder gets 404 on the scan AND every sub-resource.
+    for (const path of ['', '/hypotheses', '/findings', '/audit']) {
+      assert.equal((await app.request(`/api/scans/${scanId}${path}`, authed(cookieA))).status, 200);
+      assert.equal((await app.request(`/api/scans/${scanId}${path}`, authed(cookieB))).status, 404);
+    }
+  });
+
+  test('list endpoints return only the caller`s own rows', async () => {
+    const app = makeApp(defaultLimits);
+    const cookieA = await signUp(app, `lista-${Date.now()}@example.com`);
+    const cookieB = await signUp(app, `listb-${Date.now()}@example.com`);
+    const idA = await createTarget(app, cookieA, `list-a-${Date.now()}.example.com`);
+
+    const listA = await app.request('/api/targets', authed(cookieA));
+    const targetsA = ((await listA.json()) as { targets: { id: string }[] }).targets;
+    assert.ok(targetsA.some((t) => t.id === idA));
+
+    const listB = await app.request('/api/targets', authed(cookieB));
+    const targetsB = ((await listB.json()) as { targets: { id: string }[] }).targets;
+    assert.ok(!targetsB.some((t) => t.id === idA)); // B never sees A's target
+  });
+
   // The folded-in Unit 1 follow-up: rate-limit counters in Redis (shared across instances, ADR-20).
   // Proves the ioredis→RedisStore adapter works end-to-end. Opt-in via REDIS_URL (needs both a
   // Postgres and a Redis up).
