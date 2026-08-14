@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "findings_hypothesis_id_key" ON "findings" USING btree ("hypothesis_id");

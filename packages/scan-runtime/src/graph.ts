@@ -4,10 +4,45 @@ import {
   type HypothesizeOutcome,
   type PlanOutcome,
 } from '@corvid/agent-core';
-import type { CrawlerMapOutput } from '@corvid/tool-contracts';
+import type { CrawlerMapOutput, VulnClass } from '@corvid/tool-contracts';
+import {
+  verifyInjection,
+  verifyIdor,
+  verifyJwt,
+  verifySsrf,
+  type VerificationProof,
+  type VerifyResult,
+} from '@corvid/verify';
 import { type BaseCheckpointSaver, END, START, StateGraph, interrupt } from '@langchain/langgraph';
 
 import { type ApprovalDecision, type ApprovalRequest, ScanState } from './state.ts';
+import type { ObservedHypothesis, OobWaitRequest, OobWaitResume, PendingOob, VerifiedFinding } from './verify-phase.ts';
+
+type VerifiedResult = Extract<VerifyResult, { readonly kind: 'verified' }>;
+
+/** A safe, per-class technique descriptor for the finding's `payload` column (never a raw body). */
+function payloadDescriptor(vulnClass: VulnClass, signals: VerificationProof['signals']): string {
+  switch (vulnClass) {
+    case 'jwt':
+      return String(signals.mutation ?? 'forged-jwt');
+    case 'injection':
+      return String(signals.payloadFamily ?? signals.dialect ?? 'sqli');
+    case 'idor':
+      return 'cross-session-object-read';
+    case 'ssrf':
+      return 'oob-url-injection';
+  }
+}
+
+function toFinding(hypothesisId: string, vulnClass: VulnClass, verdict: VerifiedResult): VerifiedFinding {
+  return {
+    hypothesisId,
+    vulnClass,
+    payload: payloadDescriptor(vulnClass, verdict.proof.signals),
+    proof: verdict.proof.summary,
+    severity: verdict.severity,
+  };
+}
 
 // The scan-lifecycle graph (ADR-27). It walks the `02` §5.1 states and pauses for human approval at
 // a durable `interrupt()`. The reasoning nodes (perceive → hypothesize → plan) are real (Unit 3);
@@ -22,6 +57,16 @@ export interface ScanGraphDeps {
   hypothesize(input: HypothesizeInput): Promise<HypothesizeOutcome>;
   /** Select tester + intended payload for each pending hypothesis (agent-core `plan`). */
   plan(scanId: string): Promise<PlanOutcome>;
+  /**
+   * Run the testers for the approved hypotheses and return their observations (the act + observe
+   * step, Unit 4). Emits observations only — never a verdict (§8). The real impl wires the tester
+   * tools + `http.send` + the OOB registrar; the graph stays testable with a fake.
+   */
+  observe(scanId: string, hypothesisIds: readonly string[]): Promise<readonly ObservedHypothesis[]>;
+  /** Persist a VERIFIED finding (the deterministic gate already decided). Replay-safe (insertFinding). */
+  persistFinding(finding: VerifiedFinding): Promise<void>;
+  /** The OOB listener read used to confirm blind SSRF — a correlated callback, never a socket result. */
+  readonly oob: { wasCalledBack(token: string): Promise<boolean> };
 }
 
 export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGraphDeps) {
@@ -66,8 +111,54 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
       // a generation error or the spend stop reads `stopped` (not a stale `hypothesizing`). The
       // reason is already in `hypothesizeStatus`; the scan is re-runnable (hypothesize is replay-safe).
       .addNode('markStopped', () => ({ status: 'stopped' as const }))
-      .addNode('test', () => ({ status: 'reporting' as const }))
-      .addNode('report', () => ({ status: 'completed' as const }))
+      // act + observe: run the approved hypotheses' testers; collect observations (no verdict, §8).
+      .addNode('test', async (state) => {
+        const observations = await deps.observe(state.scanId, state.approvedHypotheses);
+        return { observations: [...observations] };
+      })
+      // verify (deterministic gate, in-process, no LLM — ADR-01): synchronous classes decide here;
+      // blind SSRF is split out to await its out-of-band callback.
+      .addNode('verify', async (state) => {
+        const pendingOob: PendingOob[] = [];
+        let verified = 0;
+        for (const observed of state.observations) {
+          const o = observed.observation;
+          if (o === null) continue; // tester could not send → not_confirmed, nothing to persist
+          if (o.vulnClass === 'ssrf') {
+            pendingOob.push({ hypothesisId: observed.hypothesisId, observation: o });
+            continue;
+          }
+          const verdict: VerifyResult =
+            o.vulnClass === 'jwt' ? verifyJwt(o) : o.vulnClass === 'injection' ? verifyInjection(o) : verifyIdor(o);
+          if (verdict.kind === 'verified') {
+            await deps.persistFinding(toFinding(observed.hypothesisId, o.vulnClass, verdict));
+            verified += 1;
+          }
+        }
+        return { pendingOob, verifiedCount: verified };
+      })
+      // Durable OOB wait (D-4). Pauses for the correlated callback; the timeout sweep resumes it at
+      // the 5-min bound (ADR-27). On resume the listener's ledger is read to decide each token.
+      .addNode('awaitOob', async (state) => {
+        // No side effect before the interrupt, so a replay is safe (§3). The resume value (timedOut)
+        // is the sweep's signal; correlation is read from the ledger below regardless.
+        interrupt<OobWaitRequest, OobWaitResume>({
+          kind: 'oob_wait',
+          scanId: state.scanId,
+          tokens: state.pendingOob.map((p) => p.observation.oobToken),
+        });
+        let verified = state.verifiedCount;
+        for (const pending of state.pendingOob) {
+          const calledBack = await deps.oob.wasCalledBack(pending.observation.oobToken);
+          const verdict = verifySsrf(pending.observation, calledBack);
+          if (verdict.kind === 'verified') {
+            await deps.persistFinding(toFinding(pending.hypothesisId, 'ssrf', verdict));
+            verified += 1;
+          }
+        }
+        return { verifiedCount: verified, pendingOob: [] as PendingOob[] };
+      })
+      .addNode('complete', () => ({ status: 'completed' as const }))
       .addEdge(START, 'authorize')
       .addEdge('authorize', 'crawl')
       .addEdge('crawl', 'perceive')
@@ -83,8 +174,14 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
       .addEdge('markStopped', END)
       .addEdge('plan', 'awaitApproval')
       .addEdge('awaitApproval', 'test')
-      .addEdge('test', 'report')
-      .addEdge('report', END)
+      .addEdge('test', 'verify')
+      // Blind SSRF present → wait out of band; otherwise the synchronous verdicts are final.
+      .addConditionalEdges('verify', (state) => (state.pendingOob.length > 0 ? 'await' : 'done'), {
+        await: 'awaitOob',
+        done: 'complete',
+      })
+      .addEdge('awaitOob', 'complete')
+      .addEdge('complete', END)
       .compile({ checkpointer })
   );
 }

@@ -20,9 +20,9 @@ export interface NewFinding {
 /**
  * Persist a VERIFIED finding. The findings store holds verified findings ONLY: the verification gate
  * (`02` §4.4) discards an unverified observation before this is ever called, so `verified` is always
- * true here — it is the single field the report writer checks (ADR-05). Replay-safety (one finding
- * per hypothesis via a unique index + onConflictDoNothing) is added when the verify node is wired
- * into the graph (Unit 5 slab 6).
+ * true here — it is the single field the report writer checks (ADR-05). Replay-safe: the verify node
+ * re-runs on resume (ADR-27), so a duplicate insert for the same hypothesis is a no-op via the
+ * `findings_hypothesis_id_key` unique index, and the already-stored finding is returned unchanged.
  */
 export async function insertFinding(db: Database, finding: NewFinding): Promise<FindingRow> {
   const rows = await db
@@ -35,9 +35,16 @@ export async function insertFinding(db: Database, finding: NewFinding): Promise<
       verified: true,
       ...(finding.severity !== undefined ? { severity: finding.severity } : {}),
     })
+    .onConflictDoNothing({ target: findings.hypothesisId })
     .returning();
-  const row = rows[0];
-  if (row === undefined) throw new Error('insertFinding: insert returned no row');
+  const inserted = rows[0];
+  if (inserted !== undefined) return inserted;
+
+  // Conflict: a finding for this hypothesis already exists (a replayed verify node). Return it as-is
+  // — never overwrite a verified finding on replay.
+  const existing = await db.select().from(findings).where(eq(findings.hypothesisId, finding.hypothesisId));
+  const row = existing[0];
+  if (row === undefined) throw new Error('insertFinding: conflict but no existing finding found');
   return row;
 }
 

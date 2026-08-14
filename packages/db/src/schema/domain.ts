@@ -78,20 +78,28 @@ export const hypotheses = pgTable(
   ],
 );
 
-export const findings = pgTable('findings', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  hypothesisId: uuid('hypothesis_id')
-    .notNull()
-    .references(() => hypotheses.id, { onDelete: 'cascade' }),
-  vulnClass: text('vuln_class').$type<VulnClass>().notNull(),
-  payload: text('payload').notNull(),
-  proof: text('proof').notNull(),
-  // The single gate the Report Writer checks — no other field admits a finding to a report.
-  verified: boolean('verified').notNull().default(false),
-  // CVSS 3.1 base score + vector (D-3, ADR-D3); the Critical/High band is derived at read time.
-  severity: text('severity'),
-  reportedAt: timestamp('reported_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const findings = pgTable(
+  'findings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    hypothesisId: uuid('hypothesis_id')
+      .notNull()
+      .references(() => hypotheses.id, { onDelete: 'cascade' }),
+    vulnClass: text('vuln_class').$type<VulnClass>().notNull(),
+    payload: text('payload').notNull(),
+    proof: text('proof').notNull(),
+    // The single gate the Report Writer checks — no other field admits a finding to a report.
+    verified: boolean('verified').notNull().default(false),
+    // CVSS 3.1 base score + vector (D-3, ADR-D3); the Critical/High band is derived at read time.
+    severity: text('severity'),
+    reportedAt: timestamp('reported_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // One verified finding per hypothesis. The verify node re-runs on resume (ADR-27), so it upserts
+    // with onConflictDoNothing on this key — a replay never double-inserts the same finding.
+    uniqueIndex('findings_hypothesis_id_key').on(table.hypothesisId),
+  ],
+);
 
 // Append-only accountability record (ADR-16). A structural UPDATE/DELETE block is added in a
 // migration; the repo layer exposes insert + read only. `scan_id` uses a plain FK (no delete

@@ -479,6 +479,9 @@ importers:
       '@corvid/tool-contracts':
         specifier: workspace:*
         version: link:../tool-contracts
+      '@corvid/verify':
+        specifier: workspace:*
+        version: link:../verify
       '@langchain/core':
         specifier: ^1.2.5
         version: 1.2.5

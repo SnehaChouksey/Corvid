@@ -2,6 +2,8 @@ import type { HypothesizeOutcome, PerceivedSurface } from '@corvid/agent-core';
 import type { CrawlerMapOutput, ScanStatus } from '@corvid/tool-contracts';
 import { Annotation } from '@langchain/langgraph';
 
+import type { ObservedHypothesis, PendingOob } from './verify-phase.ts';
+
 // The durable scan graph's state (ADR-27). Keyed by scan id (= LangGraph thread_id). `status`
 // mirrors the `02` §5.1 state machine so the persisted checkpoint always reflects a real lifecycle
 // state. LangGraph nodes re-run from their start on resume, so nodes must be idempotent (§3):
@@ -32,6 +34,12 @@ export const ScanState = Annotation.Root({
   }),
   // Hypotheses the human approved at the gate. Last-write-wins: the approval decision replaces it.
   approvedHypotheses: Annotation<string[]>({ ...lastWriteWins(), default: () => [] }),
+  // The testers' observations for the approved hypotheses (act + observe), consumed by the gate.
+  observations: Annotation<ObservedHypothesis[]>({ ...lastWriteWins(), default: () => [] }),
+  // Blind-SSRF observations awaiting a correlated OOB callback, resolved at the D-4 timeout bound.
+  pendingOob: Annotation<PendingOob[]>({ ...lastWriteWins(), default: () => [] }),
+  // Count of verified findings persisted this scan — accumulated across the sync gate and the OOB wait.
+  verifiedCount: Annotation<number>({ ...lastWriteWins(), default: () => 0 }),
 });
 
 export type ScanStateType = typeof ScanState.State;

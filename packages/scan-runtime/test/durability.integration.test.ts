@@ -21,6 +21,11 @@ const deps: ScanGraphDeps = {
   }),
   hypothesize: async () => ({ kind: 'generated', inserted: [], deduped: 0 }),
   plan: async () => ({ planned: 0 }),
+  // The test exercises the durable approval spine only; no hypotheses are approved, so these
+  // never fire (an empty approval set yields an empty test/verify phase → clean completion).
+  observe: async () => [],
+  persistFinding: async () => {},
+  oob: { wasCalledBack: async () => false },
 };
 
 // The load-bearing DoD for the durable runtime (ADR-27): a scan pauses at the approval interrupt(),
