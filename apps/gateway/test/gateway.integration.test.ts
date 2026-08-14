@@ -8,6 +8,8 @@ import { createDb, type DbHandle, runMigrations, schema } from '@corvid/db';
 import { createLogger } from '@corvid/logger';
 import type { ProofPorts } from '@corvid/proof-of-control';
 import { createRedis, honoRateLimitClient } from '@corvid/redis';
+import type { ScanRuntimeService } from '@corvid/scan-runtime';
+import type { ApprovalOutcome, CancelOutcome } from '@corvid/tool-contracts';
 import { eq } from 'drizzle-orm';
 import type { Hono } from 'hono';
 import { RedisStore } from 'hono-rate-limiter';
@@ -62,8 +64,44 @@ function runIntegrationTests(databaseUrl: string): void {
   // way in, decrypt to assert the round-trip).
   const cipher = createCipher(randomBytes(32));
   const encryptCredentials = (creds: unknown): string => cipher.encrypt(JSON.stringify(creds));
-  const makeApp = (limits: AppLimits, proofPorts: ProofPorts = noProof): Hono<AppEnv> =>
-    createApp({ auth, db: handle.db, limits, logger, proofPorts, encryptCredentials });
+
+  // The scan-runtime service is injected; a fake records calls and returns canned outcomes so the
+  // HTTP layer (owner check + outcome→status mapping) is tested without a live LangGraph.
+  interface FakeRuntime {
+    readonly service: ScanRuntimeService;
+    readonly calls: {
+      start: { scanId: string; userId: string }[];
+      approvals: { scanId: string; ownerId: string; approved: readonly string[] }[];
+      cancels: { scanId: string; ownerId: string }[];
+    };
+  }
+  function fakeRuntime(opts: { approval?: ApprovalOutcome; cancel?: CancelOutcome } = {}): FakeRuntime {
+    const calls: FakeRuntime['calls'] = { start: [], approvals: [], cancels: [] };
+    return {
+      calls,
+      service: {
+        start: (scanId, userId) => {
+          calls.start.push({ scanId, userId });
+        },
+        submitApproval: async (scanId, ownerId, sub) => {
+          calls.approvals.push({ scanId, ownerId, approved: sub.approvedHypotheses });
+          return opts.approval ?? { kind: 'accepted', approved: [...sub.approvedHypotheses], rejected: [] };
+        },
+        cancel: async (scanId, ownerId) => {
+          calls.cancels.push({ scanId, ownerId });
+          return opts.cancel ?? 'cancelled';
+        },
+      },
+    };
+  }
+  const noRuntime = fakeRuntime().service;
+
+  const makeApp = (
+    limits: AppLimits,
+    proofPorts: ProofPorts = noProof,
+    scanRuntime: ScanRuntimeService = noRuntime,
+  ): Hono<AppEnv> =>
+    createApp({ auth, db: handle.db, limits, logger, proofPorts, encryptCredentials, scanRuntime });
   const defaultLimits: AppLimits = { windowMs: 60_000, max: 100, authMax: 100, concurrentScanCap: 5 };
 
   async function signUp(app: Hono<AppEnv>, email: string): Promise<string> {
@@ -367,6 +405,111 @@ function runIntegrationTests(databaseUrl: string): void {
     assert.ok(!bodyText.includes('12345'), 'the rejected value must not be reflected'); // §5
   });
 
+  // Authorize a target (DB stamp) and start a scan; returns the scan id. Uses the given app so the
+  // injected fake runtime records the start call.
+  async function authorizedScan(app: Hono<AppEnv>, cookie: string, host: string): Promise<string> {
+    const id = await createTarget(app, cookie, host);
+    await handle.db.update(schema.targets).set({ authorizationConfirmedAt: new Date() }).where(eq(schema.targets.id, id));
+    const res = await app.request(
+      '/api/scans',
+      authed(cookie, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetId: id }),
+      }),
+    );
+    assert.equal(res.status, 201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  test('POST /scans signals the workflow to start', async () => {
+    const rt = fakeRuntime();
+    const app = makeApp(defaultLimits, noProof, rt.service);
+    const cookie = await signUp(app, `start-${Date.now()}@example.com`);
+    const scanId = await authorizedScan(app, cookie, 'start.example.com');
+    assert.equal(rt.calls.start.length, 1);
+    assert.equal(rt.calls.start[0]?.scanId, scanId); // started the exact scan just created
+  });
+
+  test('approval gate: an accepted decision maps to 200 with approved/rejected', async () => {
+    const h1 = '11111111-1111-4111-8111-111111111111';
+    const rt = fakeRuntime({ approval: { kind: 'accepted', approved: [h1], rejected: [] } });
+    const app = makeApp(defaultLimits, noProof, rt.service);
+    const cookie = await signUp(app, `appr-${Date.now()}@example.com`);
+    const scanId = await authorizedScan(app, cookie, 'appr.example.com');
+
+    const res = await app.request(
+      `/api/scans/${scanId}/approvals`,
+      authed(cookie, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ approvedHypotheses: [h1] }),
+      }),
+    );
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { status: 'accepted', approved: [h1], rejected: [] });
+    assert.deepEqual(rt.calls.approvals[0]?.approved, [h1]);
+    assert.equal(rt.calls.approvals[0]?.scanId, scanId);
+  });
+
+  test('approval gate: not_awaiting → 409, invalid_hypotheses → 400', async () => {
+    const stale = makeApp(defaultLimits, noProof, fakeRuntime({ approval: { kind: 'not_awaiting' } }).service);
+    const c1 = await signUp(stale, `stale-${Date.now()}@example.com`);
+    const s1 = await authorizedScan(stale, c1, 'stale.example.com');
+    const r1 = await stale.request(
+      `/api/scans/${s1}/approvals`,
+      authed(c1, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ approvedHypotheses: [] }) }),
+    );
+    assert.equal(r1.status, 409);
+    assert.deepEqual(await r1.json(), { error: 'not_awaiting_approval' });
+
+    const bogus = '22222222-2222-4222-8222-222222222222';
+    const inv = makeApp(defaultLimits, noProof, fakeRuntime({ approval: { kind: 'invalid_hypotheses', unknown: [bogus] } }).service);
+    const c2 = await signUp(inv, `inv-${Date.now()}@example.com`);
+    const s2 = await authorizedScan(inv, c2, 'inv.example.com');
+    const r2 = await inv.request(
+      `/api/scans/${s2}/approvals`,
+      authed(c2, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ approvedHypotheses: [bogus] }) }),
+    );
+    assert.equal(r2.status, 400);
+    assert.deepEqual(await r2.json(), { error: 'invalid_hypotheses', unknown: [bogus] });
+  });
+
+  test('approval + cancel are 404 for a non-owner (ADR-19)', async () => {
+    const rt = fakeRuntime();
+    const app = makeApp(defaultLimits, noProof, rt.service);
+    const owner = await signUp(app, `ao-${Date.now()}@example.com`);
+    const intruder = await signUp(app, `ai-${Date.now()}@example.com`);
+    const scanId = await authorizedScan(app, owner, 'ao.example.com');
+
+    const appr = await app.request(
+      `/api/scans/${scanId}/approvals`,
+      authed(intruder, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ approvedHypotheses: [] }) }),
+    );
+    assert.equal(appr.status, 404);
+    const cancel = await app.request(`/api/scans/${scanId}/cancel`, authed(intruder, { method: 'POST' }));
+    assert.equal(cancel.status, 404);
+    // The intruder's calls never reached the service (blocked at the owner gate).
+    assert.equal(rt.calls.approvals.length, 0);
+    assert.equal(rt.calls.cancels.length, 0);
+  });
+
+  test('cancel maps outcomes: cancelled → 200, not_cancellable → 409', async () => {
+    const ok = makeApp(defaultLimits, noProof, fakeRuntime({ cancel: 'cancelled' }).service);
+    const c1 = await signUp(ok, `cok-${Date.now()}@example.com`);
+    const s1 = await authorizedScan(ok, c1, 'cok.example.com');
+    const r1 = await ok.request(`/api/scans/${s1}/cancel`, authed(c1, { method: 'POST' }));
+    assert.equal(r1.status, 200);
+    assert.deepEqual(await r1.json(), { status: 'cancelled' });
+
+    const no = makeApp(defaultLimits, noProof, fakeRuntime({ cancel: 'not_cancellable' }).service);
+    const c2 = await signUp(no, `cno-${Date.now()}@example.com`);
+    const s2 = await authorizedScan(no, c2, 'cno.example.com');
+    const r2 = await no.request(`/api/scans/${s2}/cancel`, authed(c2, { method: 'POST' }));
+    assert.equal(r2.status, 409);
+    assert.deepEqual(await r2.json(), { error: 'not_cancellable' });
+  });
+
   test('list endpoints return only the caller`s own rows', async () => {
     const app = makeApp(defaultLimits);
     const cookieA = await signUp(app, `lista-${Date.now()}@example.com`);
@@ -403,6 +546,7 @@ function runIntegrationTests(databaseUrl: string): void {
           logger,
           proofPorts: noProof,
           encryptCredentials,
+          scanRuntime: noRuntime,
           rateLimitStore: store,
         });
         const cookie = await signUp(app, `redisrl-${Date.now()}@example.com`);

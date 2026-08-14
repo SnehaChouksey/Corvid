@@ -5,5 +5,6 @@ export * from './repo/scans.ts';
 export * from './repo/audit.ts';
 export * from './repo/findings.ts';
 export * from './repo/hypotheses.ts';
+export * from './repo/approvals.ts';
 export * from './repo/llm-calls.ts';
 export * from './spend.ts';

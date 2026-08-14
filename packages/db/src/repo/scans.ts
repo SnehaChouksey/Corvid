@@ -1,4 +1,4 @@
-import type { ScanStatus } from '@corvid/tool-contracts';
+import type { CancelOutcome, ScanStatus } from '@corvid/tool-contracts';
 import { and, desc, eq, sql } from 'drizzle-orm';
 
 import type { Database } from '../client.ts';
@@ -108,6 +108,50 @@ export async function createScanWithinCap(
       })
       .returning();
     return inserted[0] ?? null;
+  });
+}
+
+// Terminal states stamp `completed_at`. A scan in a terminal state is done — the concurrent-scan cap
+// no longer counts it, and it can't be cancelled.
+const TERMINAL_STATES: readonly ScanStatus[] = ['completed', 'rejected', 'cancelled', 'stopped'];
+
+/**
+ * System status sync (NOT owner-scoped): the scan-runtime service writes the durable graph's
+ * lifecycle state to `scans.status` at each invoke/resume boundary so the dashboard reflects the
+ * workflow truthfully (CODING_STANDARDS §10). Keyed by the scan id the service is already driving —
+ * this is a trusted internal write, never a user-facing mutation. Stamps `completed_at` on a
+ * terminal state.
+ */
+export async function setScanStatus(db: Database, scanId: string, status: ScanStatus): Promise<void> {
+  await db
+    .update(scans)
+    .set({ status, ...(TERMINAL_STATES.includes(status) ? { completedAt: new Date() } : {}) })
+    .where(eq(scans.id, scanId));
+}
+
+/**
+ * Cancel a scan the caller owns (Flow D/`01` §6). Advisory-locked + status-guarded so it can't race
+ * an approval submit and can't cancel a terminal scan. A cancelled scan is never resumed, so its
+ * abandoned durable interrupt (if paused at the approval gate) never fires a payload — the only
+ * payload path is the post-approval `test` node, which we never resume for a cancelled scan.
+ */
+export async function requestScanCancel(
+  db: Database,
+  ownerId: string,
+  scanId: string,
+): Promise<CancelOutcome> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${scanId}))`);
+    const rows = await tx
+      .select({ status: scans.status })
+      .from(scans)
+      .where(and(eq(scans.id, scanId), eq(scans.ownerId, ownerId)))
+      .limit(1);
+    const scan = rows[0];
+    if (scan === undefined) return 'not_found';
+    if (!ACTIVE_STATES.includes(scan.status)) return 'not_cancellable';
+    await tx.update(scans).set({ status: 'cancelled', completedAt: new Date() }).where(eq(scans.id, scanId));
+    return 'cancelled';
   });
 }
 

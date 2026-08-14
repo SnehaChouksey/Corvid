@@ -32,6 +32,7 @@ import {
   verifiedProof,
   verifyProofOfControl,
 } from '@corvid/proof-of-control';
+import type { ScanRuntimeService } from '@corvid/scan-runtime';
 import { parseScopeRules } from '@corvid/scope';
 import { type ScanCredentials, scanCredentialsSchema } from '@corvid/tool-contracts';
 import { getConnInfo } from '@hono/node-server/conninfo';
@@ -89,6 +90,11 @@ export interface AppDeps {
    * the plaintext never leaves this call. Returns opaque ciphertext.
    */
   readonly encryptCredentials: (credentials: ScanCredentials) => string;
+  /**
+   * Signals the durable scan workflow (`02` §6): start a scan, submit the approval decision, cancel.
+   * The gateway never drives LangGraph itself — it calls this service (co-located in v1, ADR-33).
+   */
+  readonly scanRuntime: ScanRuntimeService;
 }
 
 export type AppEnv = { Variables: { userId: string } };
@@ -367,6 +373,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (scan === null) {
       return c.json({ error: 'concurrent_scan_cap_reached', cap: deps.limits.concurrentScanCap }, 429);
     }
+    // Signal the workflow to begin (fire-and-forget; it runs to the approval interrupt in the
+    // background, durable across a crash — ADR-27). The row is already persisted, so the response
+    // doesn't wait on the crawl.
+    deps.scanRuntime.start(scan.id, userId);
     return c.json({ id: scan.id, status: scan.status }, 201);
   });
 
@@ -410,6 +420,40 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const scan = await requireOwnedScan(c);
     const rows = await getAuditForScanOwner(deps.db, c.get('userId'), scan.id);
     return c.json({ audit: rows.map(toAuditEntry) });
+  });
+
+  // The human approval gate (Flow D, `01` §6) — the safety-critical resume. `approvedHypotheses` may
+  // be empty (approve nothing → a clean zero-finding scan). The service records the decision durably
+  // (owner-scoped, status-guarded, audited with the human as actor) BEFORE any test runs, then
+  // resumes the workflow with exactly the approved set. Nothing is pre-approved; silence never
+  // consents (no timeout path here).
+  const approvalSchema = z.object({ approvedHypotheses: z.array(z.uuid()) }).strict();
+  api.post('/scans/:id/approvals', zValidator('json', approvalSchema), async (c) => {
+    const scan = await requireOwnedScan(c); // 404 for a non-owner (ADR-19)
+    const { approvedHypotheses } = c.req.valid('json');
+    const outcome = await deps.scanRuntime.submitApproval(scan.id, c.get('userId'), { approvedHypotheses });
+    switch (outcome.kind) {
+      case 'accepted':
+        return c.json({ status: 'accepted', approved: outcome.approved, rejected: outcome.rejected });
+      case 'not_awaiting':
+        // Stale/duplicate submit — the scan is no longer at the gate. Typed refusal, never a 500.
+        return c.json({ error: 'not_awaiting_approval' }, 409);
+      case 'invalid_hypotheses':
+        return c.json({ error: 'invalid_hypotheses', unknown: outcome.unknown }, 400);
+    }
+  });
+
+  api.post('/scans/:id/cancel', async (c) => {
+    const scan = await requireOwnedScan(c);
+    const outcome = await deps.scanRuntime.cancel(scan.id, c.get('userId'));
+    switch (outcome) {
+      case 'cancelled':
+        return c.json({ status: 'cancelled' });
+      case 'not_found':
+        throw new HTTPException(404, { message: 'Not found' });
+      case 'not_cancellable':
+        return c.json({ error: 'not_cancellable' }, 409);
+    }
   });
 
   app.route('/api', api);

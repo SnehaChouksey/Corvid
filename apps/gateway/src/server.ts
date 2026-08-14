@@ -2,10 +2,23 @@ import { lookup, resolveTxt } from 'node:dns/promises';
 
 import { createAuth } from '@corvid/auth';
 import { createCipher, loadKey } from '@corvid/crypto';
-import { createDb } from '@corvid/db';
+import {
+  createDb,
+  insertFinding,
+  recordApprovalDecision,
+  requestScanCancel,
+  setScanStatus,
+} from '@corvid/db';
+import { InfraError } from '@corvid/errors';
 import { createLogger } from '@corvid/logger';
 import type { ProofPorts } from '@corvid/proof-of-control';
 import { createRedis, honoRateLimitClient } from '@corvid/redis';
+import {
+  buildScanGraph,
+  createCheckpointer,
+  createScanRuntimeService,
+  type ScanGraphDeps,
+} from '@corvid/scan-runtime';
 import { serve } from '@hono/node-server';
 import { RedisStore, type Store } from 'hono-rate-limiter';
 
@@ -46,6 +59,51 @@ const auth = createAuth({
   baseURL: env.BETTER_AUTH_URL,
 });
 
+// ── Durable scan runtime (ADR-27), co-located in the gateway process for v1 (ADR-33) ──────────────
+// The service is the seam the gateway signals the workflow through. The DB ports (status sync,
+// approval decision, cancel) are LIVE — the human approval gate records its decision durably here.
+// The graph's REASONING and TESTER deps (crawl/hypothesize/plan/observe) are NOT yet wired: live
+// testing needs the crawler process, OpenRouter, E2B + the tester tools (external prerequisites,
+// Unit 0/8). They throw a typed InfraError until then, so a started scan fails fast and audibly
+// rather than pretending to run. persistFinding is real (verified-only store); OOB confirmation is
+// wired when the listener store lands. The periodic OOB-timeout sweep (resolver already built +
+// tested) is scheduled by the dedicated scan-runtime worker, not the gateway — Unit 8.
+const { checkpointer } = await createCheckpointer(env.DATABASE_URL);
+const notLive = (op: string): never => {
+  throw new InfraError(`scan-runtime dep '${op}' is not wired yet (live testing is Unit 0/8)`, {
+    retryable: false,
+  });
+};
+const graphDeps: ScanGraphDeps = {
+  crawl: async () => notLive('crawl'),
+  hypothesize: async () => notLive('hypothesize'),
+  plan: async () => notLive('plan'),
+  observe: async () => notLive('observe'),
+  persistFinding: async (f) => {
+    await insertFinding(db, {
+      hypothesisId: f.hypothesisId,
+      vulnClass: f.vulnClass,
+      payload: f.payload,
+      proof: f.proof,
+      severity: f.severity,
+    });
+  },
+  // No OOB confirmation until the listener store is wired (Unit 0/8); a blind SSRF then times out to
+  // not_confirmed, which is the safe default (never a false positive).
+  oob: { getCallback: async () => null },
+};
+const scanRuntime = createScanRuntimeService({
+  graph: buildScanGraph(checkpointer, graphDeps),
+  persistStatus: (scanId, status) => setScanStatus(db, scanId, status),
+  recordApproval: (scanId, ownerId, approved) =>
+    recordApprovalDecision(db, { scanId, ownerId, approvedHypotheses: approved }),
+  requestCancel: (scanId, ownerId) => requestScanCancel(db, ownerId, scanId),
+  background: (task) => {
+    void task(); // `drive` catches its own errors and logs with safe fields; never rejects
+  },
+  logger,
+});
+
 // Redis-backed rate-limit store when REDIS_URL is set (shared across instances, ADR-20). Without
 // it, hono-rate-limiter's in-memory store is used — correct for a single instance only.
 let rateLimitStore: ((prefix: string) => Store<AppEnv>) | undefined;
@@ -70,6 +128,7 @@ const app = createApp({
   proofPorts,
   // Serialize then encrypt; the plaintext credentials never leave this closure or reach a log.
   encryptCredentials: (credentials) => credentialCipher.encrypt(JSON.stringify(credentials)),
+  scanRuntime,
   ...(rateLimitStore !== undefined ? { rateLimitStore } : {}),
 });
 
