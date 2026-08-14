@@ -1,12 +1,36 @@
+import { lookup, resolveTxt } from 'node:dns/promises';
+
 import { createAuth } from '@corvid/auth';
 import { createDb } from '@corvid/db';
 import { createLogger } from '@corvid/logger';
+import type { ProofPorts } from '@corvid/proof-of-control';
 import { createRedis, honoRateLimitClient } from '@corvid/redis';
 import { serve } from '@hono/node-server';
 import { RedisStore, type Store } from 'hono-rate-limiter';
 
 import { type AppEnv, createApp } from './app.ts';
 import { loadEnv } from './env.ts';
+
+// Real IO for D-7 proof-of-control. The SSRF guard (dangerous host / dangerous resolved IP) lives in
+// @corvid/proof-of-control; these ports just do the IO. The fetch REFUSES redirects (`redirect:
+// 'error'`) so a well-known file can't 302 the request to an internal host, and is time-bounded.
+const proofPorts: ProofPorts = {
+  resolveTxt: (name) => resolveTxt(name),
+  resolveHostIps: async (host) => {
+    const records = await lookup(host, { all: true, verbatim: true });
+    return records.map((r) => r.address);
+  },
+  fetchText: async (url, timeoutMs) => {
+    const res = await fetch(url, {
+      redirect: 'error',
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { 'user-agent': 'Corvid-ProofOfControl/1.0' },
+    });
+    // The challenge file is tiny; cap what we read so a hostile large body can't be a memory DoS.
+    const body = (await res.text()).slice(0, 8_192);
+    return { ok: res.ok, status: res.status, body };
+  },
+};
 
 // Composition root: validate env (fail closed), wire dependencies, serve. Nothing here has logic
 // beyond wiring — the app is testable without a listening socket via `createApp(...).fetch`.
@@ -40,6 +64,7 @@ const app = createApp({
     concurrentScanCap: env.CONCURRENT_SCAN_CAP,
   },
   logger,
+  proofPorts,
   ...(rateLimitStore !== undefined ? { rateLimitStore } : {}),
 });
 

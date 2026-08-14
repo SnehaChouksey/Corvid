@@ -74,3 +74,47 @@ export async function updateTargetForOwner(
     .returning();
   return rows[0];
 }
+
+/**
+ * Store the proof-of-control artifact WITHOUT stamping authorization — the pending challenge issued
+ * by the D-7 flow, held until the user places it and Corvid verifies. `proof` is an opaque
+ * `Record<string, unknown>` here (the proof-of-control package owns its shape); the DB stays
+ * decoupled. Owner-scoped; returns undefined if not owned.
+ */
+export async function setTargetProofOfControl(
+  db: Database,
+  ownerId: string,
+  targetId: string,
+  proof: Record<string, unknown>,
+): Promise<TargetRow | undefined> {
+  const rows = await db
+    .update(targets)
+    .set({ proofOfControl: proof, updatedAt: new Date() })
+    .where(and(eq(targets.id, targetId), eq(targets.ownerId, ownerId)))
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Stamp a target as authorized once proof-of-control is verified (D-7): records `authorized_by`
+ * (the acting user's id — ADR-19) and the timestamp, and stores the verified proof. This is the
+ * exact record the workflow and sandbox check before any active testing (`02` §7). Owner-scoped.
+ */
+export async function confirmTargetAuthorization(
+  db: Database,
+  ownerId: string,
+  targetId: string,
+  params: { readonly authorizedBy: string; readonly proofOfControl: Record<string, unknown> },
+): Promise<TargetRow | undefined> {
+  const rows = await db
+    .update(targets)
+    .set({
+      authorizationConfirmedAt: new Date(),
+      authorizedBy: params.authorizedBy,
+      proofOfControl: params.proofOfControl,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(targets.id, targetId), eq(targets.ownerId, ownerId)))
+    .returning();
+  return rows[0];
+}

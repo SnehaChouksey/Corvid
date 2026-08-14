@@ -4,6 +4,7 @@ import { after, before, test } from 'node:test';
 import { createAuth, type Auth } from '@corvid/auth';
 import { createDb, type DbHandle, runMigrations, schema } from '@corvid/db';
 import { createLogger } from '@corvid/logger';
+import type { ProofPorts } from '@corvid/proof-of-control';
 import { createRedis, honoRateLimitClient } from '@corvid/redis';
 import { eq } from 'drizzle-orm';
 import type { Hono } from 'hono';
@@ -47,7 +48,16 @@ function runIntegrationTests(databaseUrl: string): void {
     await handle.pool.end();
   });
 
-  const makeApp = (limits: AppLimits): Hono<AppEnv> => createApp({ auth, db: handle.db, limits, logger });
+  // Proof-of-control IO is injected; the default fake proves nothing (resolves to a benign public IP
+  // so the SSRF guard passes, but no TXT/well-known match), so authorization is never granted unless
+  // a test wires a fake that "places" the token.
+  const noProof: ProofPorts = {
+    resolveTxt: async () => [],
+    resolveHostIps: async () => ['93.184.216.34'],
+    fetchText: async () => ({ ok: false, status: 404, body: '' }),
+  };
+  const makeApp = (limits: AppLimits, proofPorts: ProofPorts = noProof): Hono<AppEnv> =>
+    createApp({ auth, db: handle.db, limits, logger, proofPorts });
   const defaultLimits: AppLimits = { windowMs: 60_000, max: 100, authMax: 100, concurrentScanCap: 5 };
 
   async function signUp(app: Hono<AppEnv>, email: string): Promise<string> {
@@ -209,6 +219,64 @@ function runIntegrationTests(databaseUrl: string): void {
     assert.equal(scan.status, 403);
   });
 
+  test('D-7: a target is authorized only after proof-of-control is verified (Unit 6)', async () => {
+    // A stateful fake: DNS resolves TXT to whatever token has been "placed". Start with none placed.
+    let placed: string | null = null;
+    const proofPorts: ProofPorts = {
+      resolveTxt: async () => (placed === null ? [] : [[placed]]),
+      resolveHostIps: async () => ['93.184.216.34'],
+      fetchText: async () => ({ ok: false, status: 404, body: '' }),
+    };
+    const app = makeApp(defaultLimits, proofPorts);
+    const cookie = await signUp(app, `d7-${Date.now()}@example.com`);
+    const id = await createTarget(app, cookie, 'd7.example.com');
+
+    const authorize = () =>
+      app.request(
+        `/api/targets/${id}/authorize`,
+        authed(cookie, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({}),
+        }),
+      );
+
+    // First call issues a challenge (202 pending) and returns the token to place.
+    const challenge = await authorize();
+    assert.equal(challenge.status, 202);
+    const body = (await challenge.json()) as {
+      status: string;
+      instructions: { token: string; dns: { value: string } };
+    };
+    assert.equal(body.status, 'pending');
+    assert.ok(body.instructions.token.length > 0);
+
+    // Before placing the record, verification fails and the target stays Unauthorized.
+    const stillPending = await authorize();
+    assert.equal(stillPending.status, 202);
+    const t1 = await app.request(`/api/targets/${id}`, authed(cookie));
+    assert.equal(((await t1.json()) as { authorized: boolean }).authorized, false);
+
+    // Place the token in DNS, then verify — now authorized.
+    placed = body.instructions.dns.value;
+    const verified = await authorize();
+    assert.equal(verified.status, 200);
+    assert.equal(((await verified.json()) as { status: string }).status, 'authorized');
+    const t2 = await app.request(`/api/targets/${id}`, authed(cookie));
+    assert.equal(((await t2.json()) as { authorized: boolean }).authorized, true);
+
+    // And the scan gate now opens.
+    const scan = await app.request(
+      '/api/scans',
+      authed(cookie, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetId: id }),
+      }),
+    );
+    assert.equal(scan.status, 201);
+  });
+
   test('scan sub-resources are 404 for a non-owner (no cross-tenant leak, ADR-19)', async () => {
     const app = makeApp(defaultLimits);
     const cookieA = await signUp(app, `owner-${Date.now()}@example.com`);
@@ -269,6 +337,7 @@ function runIntegrationTests(databaseUrl: string): void {
           db: handle.db,
           limits: { ...defaultLimits, max: 2 },
           logger,
+          proofPorts: noProof,
           rateLimitStore: store,
         });
         const cookie = await signUp(app, `redisrl-${Date.now()}@example.com`);

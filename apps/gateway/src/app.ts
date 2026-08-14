@@ -1,6 +1,8 @@
 import { type Auth, resolveUserId } from '@corvid/auth';
 import {
+  appendAudit,
   type AuditRow,
+  confirmTargetAuthorization,
   createScanWithinCap,
   createTarget,
   type Database,
@@ -14,11 +16,22 @@ import {
   listScansForOwner,
   listTargetsForOwner,
   type ScanRow,
+  setTargetProofOfControl,
   type TargetRow,
   updateTargetForOwner,
 } from '@corvid/db';
 import { AuthorizationError, isCorvidError } from '@corvid/errors';
 import type { CorvidLogger } from '@corvid/logger';
+import {
+  challengeInstructions,
+  hostForTarget,
+  mintChallengeToken,
+  pendingProof,
+  type ProofPorts,
+  readPendingToken,
+  verifiedProof,
+  verifyProofOfControl,
+} from '@corvid/proof-of-control';
 import { parseScopeRules } from '@corvid/scope';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { zValidator } from '@hono/zod-validator';
@@ -64,6 +77,11 @@ export interface AppDeps {
    * falls back to its in-memory store — correct for a single instance, per-process across many.
    */
   readonly rateLimitStore?: (prefix: string) => Store<AppEnv>;
+  /**
+   * IO ports for D-7 proof-of-control verification (DNS + a redirect-refusing HTTPS GET). Injected
+   * so the gateway stays testable offline; the composition root wires node:dns/promises + fetch.
+   */
+  readonly proofPorts: ProofPorts;
 }
 
 export type AppEnv = { Variables: { userId: string } };
@@ -241,6 +259,63 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       throw new HTTPException(404, { message: 'Not found' });
     }
     return c.json(toTargetSummary(updated));
+  });
+
+  const authorizeSchema = z.object({ method: z.enum(['dns', 'well_known']).optional() }).strict();
+
+  // D-7 proof-of-control (ADR-D7). One idempotent endpoint drives a challenge/response: the first
+  // call (no pending token) MINTS a token and returns placement instructions (202 pending); a later
+  // call (token exists) VERIFIES it via DNS TXT or the /.well-known/ file and, only on proof, stamps
+  // authorization (actor + timestamp + evidence). A bare click can never authorize — the proof can't
+  // be faked. `verifyProofOfControl` refuses a dangerous/dangerous-resolving host (SSRF guard), which
+  // surfaces as a 403; a target that can't prove control simply stays Unauthorized.
+  api.post('/targets/:id/authorize', zValidator('json', authorizeSchema), async (c) => {
+    const userId = c.get('userId');
+    const targetId = c.req.param('id');
+    const target = await getTargetForOwner(deps.db, userId, targetId);
+    if (target === undefined) {
+      throw new HTTPException(404, { message: 'Not found' });
+    }
+    // Idempotent: already authorized → report it, never re-mint or re-verify.
+    if (target.authorizationConfirmedAt !== null) {
+      return c.json({ status: 'authorized', authorizationConfirmedAt: target.authorizationConfirmedAt });
+    }
+
+    const host = hostForTarget(target.url); // AuthorizationError → 403 on a bad/host-less URL
+
+    const existing = readPendingToken(target.proofOfControl);
+    if (existing === null) {
+      // Issue the challenge; the user places it, then calls again to verify.
+      const token = mintChallengeToken();
+      await setTargetProofOfControl(deps.db, userId, targetId, { ...pendingProof(token) });
+      return c.json({ status: 'pending', instructions: challengeInstructions(host, token) }, 202);
+    }
+
+    const { method } = c.req.valid('json');
+    const result = await verifyProofOfControl(
+      host,
+      existing,
+      deps.proofPorts,
+      method !== undefined ? { method } : {},
+    );
+    if (!result.verified) {
+      return c.json(
+        { status: 'pending', instructions: challengeInstructions(host, existing), reason: result.reason },
+        202,
+      );
+    }
+    const proof = { ...verifiedProof(existing, result.method, result.evidence) };
+    const updated = await confirmTargetAuthorization(deps.db, userId, targetId, {
+      authorizedBy: userId,
+      proofOfControl: proof,
+    });
+    // Audit the authorization at the point it happens (ADR-16); method only, never the token (§5).
+    await appendAudit(deps.db, { action: 'target.authorized', actor: userId, detail: `method=${result.method}` });
+    return c.json({
+      status: 'authorized',
+      method: result.method,
+      authorizationConfirmedAt: updated?.authorizationConfirmedAt ?? null,
+    });
   });
 
   const createScanSchema = z.object({ targetId: z.uuid() }).strict();
