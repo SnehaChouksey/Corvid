@@ -1,0 +1,31 @@
+{
+  "name": "@corvid/oob-listener",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "node --test",
+    "start": "node dist/server.js"
+  },
+  "devDependencies": {
+    "@corvid/eslint-config": "workspace:*",
+    "@corvid/typescript-config": "workspace:*",
+    "@types/node": "^24.9.0",
+    "eslint": "^9.39.0",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@corvid/config": "workspace:*",
+    "@corvid/db": "workspace:*",
+    "@corvid/errors": "workspace:*",
+    "@corvid/logger": "workspace:*",
+    "@corvid/redis": "workspace:*",
+    "@hono/node-server": "^2.1.0",
+    "@hono/zod-validator": "^0.9.0",
+    "hono": "^4.13.1",
+    "zod": "^4.4.3"
+  }
+}

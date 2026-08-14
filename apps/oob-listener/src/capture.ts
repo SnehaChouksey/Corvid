@@ -1,0 +1,38 @@
+// Pure classification of an inbound request by its Host header (no I/O, unit-testable). The listener
+// serves two roles on one process, told apart by host:
+//   - the apex `OOB_HOST` is the internal control plane (register a token / query a callback);
+//   - `<token>.<OOB_HOST>` is a callback — the target's server-side fetch reached us out of band.
+// Any other host is ignored (not ours). The token is the leftmost DNS label; correlation to a
+// registered token happens in the store, so an arbitrary `<junk>.<OOB_HOST>` probe is harmless.
+
+export type HostClassification =
+  | { readonly kind: 'control' }
+  | { readonly kind: 'callback'; readonly token: string }
+  | { readonly kind: 'ignore' };
+
+// A DNS label the token could plausibly be. Our tokens are 32 hex chars; bound it loosely so a
+// malformed label is ignored rather than treated as a (never-registered) token.
+const TOKEN_LABEL = /^[a-z0-9]{8,64}$/;
+
+/** Strip an optional `:port` and lowercase; Host headers may carry either. */
+function normalizeHost(hostHeader: string): string {
+  const withoutPort = hostHeader.split(':', 1)[0] ?? '';
+  return withoutPort.trim().toLowerCase();
+}
+
+export function classifyHost(hostHeader: string | undefined, oobHost: string): HostClassification {
+  if (hostHeader === undefined || hostHeader.length === 0) return { kind: 'ignore' };
+  const host = normalizeHost(hostHeader);
+  const apex = oobHost.trim().toLowerCase();
+  if (host.length === 0 || apex.length === 0) return { kind: 'ignore' };
+
+  if (host === apex) return { kind: 'control' };
+
+  const suffix = `.${apex}`;
+  if (!host.endsWith(suffix)) return { kind: 'ignore' };
+
+  // The token is the leftmost label of `<token>.<apex>`.
+  const token = host.slice(0, host.length - suffix.length).split('.')[0] ?? '';
+  if (!TOKEN_LABEL.test(token)) return { kind: 'ignore' };
+  return { kind: 'callback', token };
+}
