@@ -36,6 +36,10 @@ test('a malformed token label is ignored (never treated as a token)', () => {
   assert.deepEqual(classifyHost(`bad_token.${OOB}`, OOB), { kind: 'ignore' }); // underscore not allowed
 });
 
+test('a multi-label prefix is ignored — a callback host must be exactly <token>.<apex>', () => {
+  assert.deepEqual(classifyHost(`${TOKEN}.extra.${OOB}`, OOB), { kind: 'ignore' });
+});
+
 test('a missing or empty Host is ignored', () => {
   assert.deepEqual(classifyHost(undefined, OOB), { kind: 'ignore' });
   assert.deepEqual(classifyHost('', OOB), { kind: 'ignore' });

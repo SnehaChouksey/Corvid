@@ -4,7 +4,7 @@ import {
   type HypothesizeOutcome,
   type PlanOutcome,
 } from '@corvid/agent-core';
-import type { CrawlerMapOutput, VulnClass } from '@corvid/tool-contracts';
+import type { CrawlerMapOutput, OobCallback, VulnClass } from '@corvid/tool-contracts';
 import {
   verifyInjection,
   verifyIdor,
@@ -65,8 +65,8 @@ export interface ScanGraphDeps {
   observe(scanId: string, hypothesisIds: readonly string[]): Promise<readonly ObservedHypothesis[]>;
   /** Persist a VERIFIED finding (the deterministic gate already decided). Replay-safe (insertFinding). */
   persistFinding(finding: VerifiedFinding): Promise<void>;
-  /** The OOB listener read used to confirm blind SSRF — a correlated callback, never a socket result. */
-  readonly oob: { wasCalledBack(token: string): Promise<boolean> };
+  /** The OOB listener read used to confirm blind SSRF — the correlated callback, never a socket result. */
+  readonly oob: { getCallback(token: string): Promise<OobCallback | null> };
 }
 
 export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGraphDeps) {
@@ -105,6 +105,16 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
           kind: 'approval_request',
           scanId: state.scanId,
         });
+        // Fail closed on a malformed/misrouted resume: a payload that is not a real approval decision
+        // (e.g. a stray OOB timeout signal) must NEVER be read as an approval — invariant #1. Throw
+        // rather than proceed with an undefined/garbage approval set.
+        if (
+          decision === null ||
+          typeof decision !== 'object' ||
+          !Array.isArray((decision as ApprovalDecision).approvedHypotheses)
+        ) {
+          throw new Error('awaitApproval resumed without a valid approval decision');
+        }
         return { status: 'testing' as const, approvedHypotheses: [...decision.approvedHypotheses] };
       })
       // Terminal for the non-approval branch: record a real lifecycle state so a scan that ended via
@@ -119,9 +129,13 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
       // verify (deterministic gate, in-process, no LLM — ADR-01): synchronous classes decide here;
       // blind SSRF is split out to await its out-of-band callback.
       .addNode('verify', async (state) => {
+        // Defense-in-depth on invariant #1: only ever verify/persist an observation for a hypothesis
+        // the human actually approved, regardless of what `observe` returned.
+        const approved = new Set(state.approvedHypotheses);
         const pendingOob: PendingOob[] = [];
         let verified = 0;
         for (const observed of state.observations) {
+          if (!approved.has(observed.hypothesisId)) continue;
           const o = observed.observation;
           if (o === null) continue; // tester could not send → not_confirmed, nothing to persist
           if (o.vulnClass === 'ssrf') {
@@ -140,17 +154,21 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
       // Durable OOB wait (D-4). Pauses for the correlated callback; the timeout sweep resumes it at
       // the 5-min bound (ADR-27). On resume the listener's ledger is read to decide each token.
       .addNode('awaitOob', async (state) => {
-        // No side effect before the interrupt, so a replay is safe (§3). The resume value (timedOut)
-        // is the sweep's signal; correlation is read from the ledger below regardless.
-        interrupt<OobWaitRequest, OobWaitResume>({
+        // No side effect before the interrupt, so a replay is safe (§3). The resume MUST be the D-4
+        // timeout signal (the sweep is the only resumer). Fail closed on anything else so a stray
+        // resume can't silently collapse the wait to not_confirmed before the callback window elapses.
+        const resume = interrupt<OobWaitRequest, OobWaitResume>({
           kind: 'oob_wait',
           scanId: state.scanId,
           tokens: state.pendingOob.map((p) => p.observation.oobToken),
         });
+        if (resume === null || typeof resume !== 'object' || (resume as OobWaitResume).timedOut !== true) {
+          throw new Error('awaitOob resumed without a valid timeout signal');
+        }
         let verified = state.verifiedCount;
         for (const pending of state.pendingOob) {
-          const calledBack = await deps.oob.wasCalledBack(pending.observation.oobToken);
-          const verdict = verifySsrf(pending.observation, calledBack);
+          const callback = await deps.oob.getCallback(pending.observation.oobToken);
+          const verdict = verifySsrf(pending.observation, callback);
           if (verdict.kind === 'verified') {
             await deps.persistFinding(toFinding(pending.hypothesisId, 'ssrf', verdict));
             verified += 1;

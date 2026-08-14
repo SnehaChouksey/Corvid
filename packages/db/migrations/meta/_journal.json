@@ -43,6 +43,13 @@
       "when": 1786729756241,
       "tag": "0005_far_impossible_man",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786731350671,
+      "tag": "0006_fantastic_junta",
+      "breakpoints": true
     }
   ]
 }

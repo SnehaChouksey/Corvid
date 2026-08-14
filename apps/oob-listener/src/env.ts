@@ -1,17 +1,22 @@
 import { parseEnv } from '@corvid/config';
 import * as z from 'zod';
 
-// OOB listener configuration, validated at startup and fail-closed (§9). OOB_HOST is the wildcard
-// apex the listener owns (e.g. `oob.example.com`, with `*.oob.example.com` pointed here): the SSRF
-// payload references `<token>.<OOB_HOST>` and an inbound callback carries it in the Host header. It
-// is safety-relevant and has no safe default, so a missing value fails the boot. DATABASE_URL is
-// required for the audit log (ADR-16). REDIS_URL backs the token ledger across services and
-// restarts; without it the store is in-memory (single instance, lost on restart) — a boot warning.
+// OOB listener configuration, validated at startup and fail-closed (§9). Every value here is
+// safety-relevant and has no safe default, so a missing one fails the boot:
+//   - OOB_HOST — the wildcard apex the listener owns (e.g. `oob.example.com`, `*.oob.example.com`
+//     pointed here); the SSRF payload references `<token>.<OOB_HOST>` and a callback carries it in
+//     the Host header.
+//   - DATABASE_URL — the append-only audit log (ADR-16).
+//   - REDIS_URL — the token ledger. REQUIRED (not optional): the listener's writes and the runtime's
+//     reads must share one ledger, so an in-memory fallback would silently disable SSRF confirmation
+//     in any multi-process deploy — the exact silent degradation §9 forbids.
+//   - OOB_CONTROL_TOKEN — the shared bearer gating the internal control plane (register/query).
 const EnvSchema = z.object({
   OOB_HOST: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(8080),
   DATABASE_URL: z.string().min(1),
-  REDIS_URL: z.string().min(1).optional(),
+  REDIS_URL: z.string().min(1),
+  OOB_CONTROL_TOKEN: z.string().min(16),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

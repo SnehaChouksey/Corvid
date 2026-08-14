@@ -30,6 +30,7 @@ export async function ssrfCheck(send: SendFn, oob: OobRegistrar, input: SsrfChec
 
   const injected = injectPayload(target.url, input.baseBody, param, payloadUrl);
   if (!injected.ok) return { kind: 'not_sent', reason: 'unsupported', detail: injected.reason };
+  const sentAt = Date.now();
   const out = await send({
     scanId: target.scanId,
     method: target.method,
@@ -38,9 +39,10 @@ export async function ssrfCheck(send: SendFn, oob: OobRegistrar, input: SsrfChec
   });
 
   // The request to the target endpoint is what http.send scopes; the OOB URL is only a param value.
-  // A refusal/dedup means the payload didn't go out this run — reflected as sent:false.
+  // A refusal/dedup means the payload didn't go out this run — reflected as sent:false. `sentAt`
+  // lets the verifier bound a correlated callback to the D-4 window.
   return {
     kind: 'observed',
-    observation: { vulnClass: 'ssrf', param, oobToken: token, sent: out.outcome === 'sent' },
+    observation: { vulnClass: 'ssrf', param, oobToken: token, sent: out.outcome === 'sent', sentAt },
   };
 }

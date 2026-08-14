@@ -1,0 +1,1 @@
+ALTER TABLE "findings" ADD CONSTRAINT "findings_verified_true" CHECK ("findings"."verified" = true);

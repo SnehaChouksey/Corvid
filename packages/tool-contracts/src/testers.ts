@@ -88,6 +88,8 @@ export const ssrfObservationSchema = z
     oobToken: z.string().min(1),
     /** Whether the referencing payload was sent. Confirmation is out-of-band, never a socket signal. */
     sent: z.boolean(),
+    /** Epoch ms the payload was sent — the verifier bounds a correlated callback to the D-4 window. */
+    sentAt: z.number().int().nonnegative(),
   })
   .strict();
 export type SsrfObservation = z.infer<typeof ssrfObservationSchema>;

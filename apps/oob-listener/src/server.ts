@@ -6,7 +6,6 @@ import { serve } from '@hono/node-server';
 import { createOobApp } from './app.ts';
 import { DbAuditSink } from './audit.ts';
 import { loadEnv } from './env.ts';
-import { InMemoryOobStore, type OobStore } from './store.ts';
 
 // Composition root: validate env (fail closed), wire dependencies, serve. Nothing here has logic
 // beyond wiring — the app is testable without a listening socket via `createOobApp(...).fetch`.
@@ -14,16 +13,15 @@ async function main(): Promise<void> {
   const env = loadEnv();
   const logger = createLogger({ level: env.LOG_LEVEL, service: 'oob-listener' });
   const { db } = createDb(env.DATABASE_URL);
+  const store = new OobCallbackStore(createRedis(env.REDIS_URL));
 
-  let store: OobStore;
-  if (env.REDIS_URL !== undefined) {
-    store = new OobCallbackStore(createRedis(env.REDIS_URL));
-  } else {
-    logger.warn('REDIS_URL not set — OOB token store is in-memory (single instance, lost on restart). Set REDIS_URL in prod.');
-    store = new InMemoryOobStore();
-  }
-
-  const app = createOobApp({ store, audit: new DbAuditSink(db), logger, oobHost: env.OOB_HOST });
+  const app = createOobApp({
+    store,
+    audit: new DbAuditSink(db),
+    logger,
+    oobHost: env.OOB_HOST,
+    controlToken: env.OOB_CONTROL_TOKEN,
+  });
   serve({ fetch: app.fetch, port: env.PORT }, (info) => {
     logger.info({ port: info.port, oobHost: env.OOB_HOST }, 'oob-listener listening');
   });

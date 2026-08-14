@@ -136,6 +136,9 @@ importers:
       '@corvid/redis':
         specifier: workspace:*
         version: link:../../packages/redis
+      '@corvid/tool-contracts':
+        specifier: workspace:*
+        version: link:../../packages/tool-contracts
       '@hono/node-server':
         specifier: ^2.1.0
         version: 2.1.0(hono@4.13.1)
@@ -423,6 +426,9 @@ importers:
       '@corvid/errors':
         specifier: workspace:*
         version: link:../errors
+      '@corvid/tool-contracts':
+        specifier: workspace:*
+        version: link:../tool-contracts
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0(supports-color@7.2.0)

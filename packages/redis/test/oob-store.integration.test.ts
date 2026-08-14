@@ -28,23 +28,26 @@ function runIntegrationTests(url: string): void {
   test('register mints a token bound to the scan; not yet called back', async () => {
     token = await store.register(scanId);
     assert.match(token, /^[0-9a-f]{32}$/);
-    assert.equal(await store.wasCalledBack(token), false);
+    assert.equal(await store.getCallback(token), null);
   });
 
-  test('markCalledBack records a correlated callback exactly once (single-use)', async () => {
-    const first = await store.markCalledBack(token);
+  test('markCalledBack records a correlated callback with provenance exactly once (single-use)', async () => {
+    const first = await store.markCalledBack(token, { receivedAt: 1_000, sourceIp: '203.0.113.5' });
     assert.deepEqual(first, { recorded: true, scanId });
-    assert.equal(await store.wasCalledBack(token), true);
+    const cb = await store.getCallback(token);
+    assert.equal(cb?.receivedAt, 1_000);
+    assert.equal(cb?.sourceIp, '203.0.113.5');
 
-    // A second callback for the same token is idempotent — recorded:false, no double-count.
-    const second = await store.markCalledBack(token);
+    // A second callback for the same token is idempotent — recorded:false, provenance unchanged.
+    const second = await store.markCalledBack(token, { receivedAt: 9_999, sourceIp: '198.51.100.9' });
     assert.equal(second.recorded, false);
     assert.equal(second.scanId, scanId);
+    assert.equal((await store.getCallback(token))?.receivedAt, 1_000); // first callback wins
   });
 
   test('an unregistered token records nothing (the correlation guard)', async () => {
     const unknown = 'ffffffffffffffffffffffffffffffff';
-    assert.deepEqual(await store.markCalledBack(unknown), { recorded: false });
-    assert.equal(await store.wasCalledBack(unknown), false);
+    assert.deepEqual(await store.markCalledBack(unknown, { receivedAt: 1 }), { recorded: false });
+    assert.equal(await store.getCallback(unknown), null);
   });
 }

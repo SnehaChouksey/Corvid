@@ -50,6 +50,7 @@ test('ssrf observation carries the OOB token (confirmation is out-of-band, not a
     param: { name: 'url', location: 'query' },
     oobToken: 'tok-abc123',
     sent: true,
+    sentAt: 1_000_000,
   });
   assert.equal(obs.vulnClass, 'ssrf');
 });

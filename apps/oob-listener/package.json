@@ -23,6 +23,7 @@
     "@corvid/errors": "workspace:*",
     "@corvid/logger": "workspace:*",
     "@corvid/redis": "workspace:*",
+    "@corvid/tool-contracts": "workspace:*",
     "@hono/node-server": "^2.1.0",
     "@hono/zod-validator": "^0.9.0",
     "hono": "^4.13.1",

@@ -13,9 +13,21 @@ export interface OobRegistration {
   readonly host: string;
 }
 
+/**
+ * A recorded inbound callback — the provenance the verifier and the report carry. `receivedAt` lets
+ * the gate bound the callback to the D-4 window; `sourceIp` is what an analyst triages ("a fetch from
+ * this address retrieved the token"). Safe scalars only — never request headers or body (§5).
+ */
+export interface OobCallback {
+  /** Epoch ms the listener observed the callback. */
+  readonly receivedAt: number;
+  /** Best-effort source address of the callback (safe metadata for triage). */
+  readonly sourceIp?: string;
+}
+
 export interface OobListener {
   /** Register a per-test token with the listener for a scan; returns the token + callback host. */
   register(scanId: string): Promise<OobRegistration>;
-  /** Whether a correlated inbound callback for this token has been observed by the listener. */
-  wasCalledBack(token: string): Promise<boolean>;
+  /** The correlated inbound callback recorded for this token, or null if none — never a socket result. */
+  getCallback(token: string): Promise<OobCallback | null>;
 }

@@ -25,7 +25,7 @@ const deps: ScanGraphDeps = {
   // never fire (an empty approval set yields an empty test/verify phase → clean completion).
   observe: async () => [],
   persistFinding: async () => {},
-  oob: { wasCalledBack: async () => false },
+  oob: { getCallback: async () => null },
 };
 
 // The load-bearing DoD for the durable runtime (ADR-27): a scan pauses at the approval interrupt(),

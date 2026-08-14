@@ -56,9 +56,19 @@ export async function sweepOobTimeouts(ports: OobSweepPorts, nowMs: number): Pro
   const due = findTimedOutThreads(await ports.listPausedOob(), nowMs, ports.maxAgeMs);
   const resolved: string[] = [];
   for (const threadId of due) {
+    // Audit BEFORE resuming: once resumed the thread is no longer paused, so a post-resume audit that
+    // failed would be lost forever. A duplicate note on a retried tick is harmless (append-only log);
+    // a missing one is a defect. An audit failure must not block the resume — log it and proceed.
+    try {
+      if (ports.audit !== undefined) await ports.audit({ scanId: threadId, action: 'oob.timeout' });
+    } catch (cause) {
+      ports.logger?.error(
+        { err_name: cause instanceof Error ? cause.name : 'unknown', threadId },
+        'oob sweep audit failed; resuming anyway',
+      );
+    }
     try {
       await ports.resume(threadId, { timedOut: true });
-      if (ports.audit !== undefined) await ports.audit({ scanId: threadId, action: 'oob.timeout' });
       resolved.push(threadId);
     } catch (cause) {
       ports.logger?.error(

@@ -29,7 +29,7 @@ function baseDeps(overrides: Partial<ScanGraphDeps>): ScanGraphDeps {
     plan: async () => ({ planned: 0 }),
     observe: async () => [],
     persistFinding: async () => {},
-    oob: { wasCalledBack: async () => false },
+    oob: { getCallback: async () => null },
     ...overrides,
   };
 }
@@ -61,6 +61,7 @@ const ssrfObs = (sent: boolean): SsrfObservation => ({
   param: { name: 'url', location: 'query' },
   oobToken: 'tok1',
   sent,
+  sentAt: Date.now(),
 });
 
 // ---- existing routing tests ----
@@ -182,7 +183,8 @@ test('blind SSRF pauses at the OOB wait, then verifies on a correlated callback'
       persistFinding: async (f) => {
         persisted.push(f);
       },
-      oob: { wasCalledBack: async () => true }, // the listener recorded a correlated callback
+      // the listener recorded a correlated callback with provenance
+      oob: { getCallback: async () => ({ receivedAt: Date.now(), sourceIp: '203.0.113.1' }) },
     }),
   );
   const cfg = { configurable: { thread_id: 'ssrf-hit' } };
@@ -212,7 +214,7 @@ test('blind SSRF with no callback marks not confirmed at the wait — no finding
       persistFinding: async (f) => {
         persisted.push(f);
       },
-      oob: { wasCalledBack: async () => false }, // suppressed — no callback within the bound
+      oob: { getCallback: async () => null }, // suppressed — no callback recorded
     }),
   );
   const cfg = { configurable: { thread_id: 'ssrf-miss' } };

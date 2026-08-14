@@ -5,14 +5,12 @@
 // Any other host is ignored (not ours). The token is the leftmost DNS label; correlation to a
 // registered token happens in the store, so an arbitrary `<junk>.<OOB_HOST>` probe is harmless.
 
+import { OOB_TOKEN } from '@corvid/redis';
+
 export type HostClassification =
   | { readonly kind: 'control' }
   | { readonly kind: 'callback'; readonly token: string }
   | { readonly kind: 'ignore' };
-
-// A DNS label the token could plausibly be. Our tokens are 32 hex chars; bound it loosely so a
-// malformed label is ignored rather than treated as a (never-registered) token.
-const TOKEN_LABEL = /^[a-z0-9]{8,64}$/;
 
 /** Strip an optional `:port` and lowercase; Host headers may carry either. */
 function normalizeHost(hostHeader: string): string {
@@ -31,8 +29,10 @@ export function classifyHost(hostHeader: string | undefined, oobHost: string): H
   const suffix = `.${apex}`;
   if (!host.endsWith(suffix)) return { kind: 'ignore' };
 
-  // The token is the leftmost label of `<token>.<apex>`.
-  const token = host.slice(0, host.length - suffix.length).split('.')[0] ?? '';
-  if (!TOKEN_LABEL.test(token)) return { kind: 'ignore' };
-  return { kind: 'callback', token };
+  // A callback host is EXACTLY `<token>.<apex>` — the prefix must be a single label matching the
+  // fixed token shape. A multi-label prefix (`<token>.extra.<apex>`) or a malformed one is ignored
+  // rather than treated as a never-registered token (the Host header is attacker-controlled).
+  const prefix = host.slice(0, host.length - suffix.length);
+  if (!OOB_TOKEN.test(prefix)) return { kind: 'ignore' };
+  return { kind: 'callback', token: prefix };
 }

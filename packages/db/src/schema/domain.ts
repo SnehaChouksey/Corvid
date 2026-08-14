@@ -1,6 +1,8 @@
 import type { HypothesisPlan, HypothesisStatus, ScanStatus, VulnClass } from '@corvid/tool-contracts';
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -98,6 +100,9 @@ export const findings = pgTable(
     // One verified finding per hypothesis. The verify node re-runs on resume (ADR-27), so it upserts
     // with onConflictDoNothing on this key — a replay never double-inserts the same finding.
     uniqueIndex('findings_hypothesis_id_key').on(table.hypothesisId),
+    // The findings store holds VERIFIED findings only (ADR-05) — the single gate the report writer
+    // checks. Make that structural, not call-site vigilance (§5): the DB rejects a verified=false row.
+    check('findings_verified_true', sql`${table.verified} = true`),
   ],
 );
 

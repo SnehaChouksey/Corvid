@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@corvid/errors": "workspace:*",
+    "@corvid/tool-contracts": "workspace:*",
     "ioredis": "^6.0.0"
   }
 }

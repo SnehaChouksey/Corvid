@@ -1,9 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
+import { OOB_TOKEN } from '@corvid/redis';
+import type { OobCallback } from '@corvid/tool-contracts';
+
 // The token registry + callback ledger the listener depends on. The Redis-backed
 // `OobCallbackStore` (@corvid/redis) conforms to this interface for real deployments; the in-memory
-// impl below is for tests and a single-instance box. A token is single-use and correlated: a
-// callback for an unregistered token records nothing (that is the false-positive guard).
+// impl below is a TEST DOUBLE ONLY (single process, lost on restart) — production requires Redis so
+// the listener's writes and the runtime's reads share one ledger. A token is single-use and
+// correlated: a callback for an unregistered token records nothing (that is the false-positive guard).
 
 export interface OobCallbackRecord {
   readonly recorded: boolean;
@@ -14,15 +18,15 @@ export interface OobStore {
   /** Mint a unique token bound to a scan; the payload references `<token>.<host>`. */
   register(scanId: string): Promise<string>;
   /** Record an inbound callback; recorded only if the token was registered (returns owning scan). */
-  markCalledBack(token: string): Promise<OobCallbackRecord>;
-  /** Whether a correlated callback was recorded for this token. */
-  wasCalledBack(token: string): Promise<boolean>;
+  markCalledBack(token: string, callback: OobCallback): Promise<OobCallbackRecord>;
+  /** The correlated callback recorded for this token, or null if none. */
+  getCallback(token: string): Promise<OobCallback | null>;
 }
 
-/** In-memory store for tests and single-instance runs; state is lost on restart. */
+/** In-memory test double; state is lost on restart. Not for production (see the note above). */
 export class InMemoryOobStore implements OobStore {
   readonly #tokens = new Map<string, string>();
-  readonly #calledBack = new Set<string>();
+  readonly #callbacks = new Map<string, OobCallback>();
 
   async register(scanId: string): Promise<string> {
     const token = randomBytes(16).toString('hex');
@@ -30,15 +34,17 @@ export class InMemoryOobStore implements OobStore {
     return Promise.resolve(token);
   }
 
-  async markCalledBack(token: string): Promise<OobCallbackRecord> {
+  async markCalledBack(token: string, callback: OobCallback): Promise<OobCallbackRecord> {
+    if (!OOB_TOKEN.test(token)) return Promise.resolve({ recorded: false });
     const scanId = this.#tokens.get(token);
     if (scanId === undefined) return Promise.resolve({ recorded: false });
-    const recorded = !this.#calledBack.has(token);
-    this.#calledBack.add(token);
+    const recorded = !this.#callbacks.has(token);
+    if (recorded) this.#callbacks.set(token, callback); // first callback wins (single-use)
     return Promise.resolve({ recorded, scanId });
   }
 
-  async wasCalledBack(token: string): Promise<boolean> {
-    return Promise.resolve(this.#calledBack.has(token));
+  async getCallback(token: string): Promise<OobCallback | null> {
+    if (!OOB_TOKEN.test(token)) return Promise.resolve(null);
+    return Promise.resolve(this.#callbacks.get(token) ?? null);
   }
 }
