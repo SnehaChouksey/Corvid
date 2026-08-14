@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import { createHttpSend, type FetchRequest, type HttpSendPorts } from '@corvid/http-send';
 import type { HttpResponse } from '@corvid/tool-contracts';
+import { verifyIdor, verifyInjection, verifyJwt } from '@corvid/verify';
 
 import { idorCompare, injectionFuzz, jwtMutateTest } from '../src/index.ts';
 
@@ -81,6 +82,10 @@ if (JUICESHOP_URL === undefined) {
     const control = outcome.observation.attempts.find((a) => a.payloadFamily === 'escaped-control');
     assert.ok(control, 'expected an escaped-control attempt');
     assert.deepEqual(control?.matchedErrorPatterns, []); // the false-positive guard
+
+    // End-to-end: the deterministic verifier turns the observation into a CONFIRMED finding.
+    const verdict = verifyInjection(outcome.observation);
+    assert.equal(verdict.kind, 'verified', `injection verdict: ${verdict.kind}`);
   });
 
   test('jwt.mutate_test gathers the three-way auth-state signal on a real JWT oracle', async () => {
@@ -98,6 +103,12 @@ if (JUICESHOP_URL === undefined) {
     assert.equal(outcome.observation.noToken.status, 401);
     assert.equal(outcome.observation.validToken.status, 200);
     assert.ok(outcome.observation.mutations.some((m) => m.kind === 'alg_none'), 'expected the alg:none forgery to be attempted');
+
+    // End-to-end: run the deterministic verifier on the real observation. This is the definitive
+    // answer to "is this JWT forgeable?" — it is verified ONLY if a forged token got the authed
+    // response distinct from no-token. Either verdict is a real result (Juice Shop's version varies).
+    const verdict = verifyJwt(outcome.observation);
+    assert.ok(verdict.kind === 'verified' || verdict.kind === 'not_confirmed', `jwt verdict was ${verdict.kind}`);
   });
 
   test('idor.compare — a low-priv session reads the victim’s ACTUAL basket, not merely a 200', async () => {
@@ -116,15 +127,22 @@ if (JUICESHOP_URL === undefined) {
       target: { scanId: DUMMY_SCAN, url: `${baseUrl}/rest/basket/${victim.bid}`, method: 'GET' },
       lowPrivilege: { headers: { authorization: `Bearer ${attacker.token}` } },
       highPrivilege: { headers: { authorization: `Bearer ${victim.token}` } },
+      // D-15 controls, under the attacker's session: its OWN basket (should succeed, different data)
+      // and a non-existent id (should fail).
+      ownResourceUrl: `${baseUrl}/rest/basket/${attacker.bid}`,
+      absentResourceUrl: `${baseUrl}/rest/basket/9999999`,
     });
 
     assert.equal(outcome.kind, 'observed');
     if (outcome.kind !== 'observed') return;
     assert.equal(outcome.observation.lowPrivilege.status, 200);
     assert.equal(outcome.observation.highPrivilege.status, 200);
-    // The load-bearing assertion: the attacker's response is BYTE-IDENTICAL to the owner's, so the
-    // attacker read the victim's real basket, not its own. Status 200 alone would not prove this.
+    // The attacker's response is byte-identical to the owner's → it read the victim's real basket.
     assert.equal(outcome.observation.lowPrivilege.bodyHash, outcome.observation.highPrivilege.bodyHash);
-    assert.ok(outcome.observation.lowPrivilege.bodyLength > 0);
+
+    // End-to-end: the verifier confirms the IDOR only with the D-15 controls holding (attacker read
+    // the victim's data, distinct from its own; a non-existent id was denied).
+    const verdict = verifyIdor(outcome.observation);
+    assert.equal(verdict.kind, 'verified', `idor verdict: ${verdict.kind}`);
   });
 }

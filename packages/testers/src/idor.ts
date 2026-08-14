@@ -21,6 +21,10 @@ export interface IdorCompareInput {
   /** The higher-privilege / owning session — the expected-authorized baseline. */
   readonly highPrivilege: IdorSession;
   readonly baseBody?: string;
+  /** D-15 self control: a resource the low-priv session legitimately owns (should succeed). */
+  readonly ownResourceUrl?: string;
+  /** D-15 absent control: a non-existent id under the low-priv session (should fail). */
+  readonly absentResourceUrl?: string;
 }
 
 export type IdorOutcome = { readonly kind: 'observed'; readonly observation: IdorObservation } | NotSent;
@@ -30,15 +34,28 @@ export async function idorCompare(send: SendFn, input: IdorCompareInput): Promis
   const base = {
     scanId: target.scanId,
     method: target.method,
-    url: target.url,
     ...(input.baseBody !== undefined ? { body: input.baseBody } : {}),
   };
 
-  const low = signalFrom(await send({ ...base, headers: input.lowPrivilege.headers }));
+  const low = signalFrom(await send({ ...base, url: target.url, headers: input.lowPrivilege.headers }));
   if (!low.ok) return { kind: 'not_sent', reason: low.notSent };
 
-  const high = signalFrom(await send({ ...base, headers: input.highPrivilege.headers }));
+  const high = signalFrom(await send({ ...base, url: target.url, headers: input.highPrivilege.headers }));
   if (!high.ok) return { kind: 'not_sent', reason: high.notSent };
+
+  // D-15 controls, issued under the LOW-priv session, when the caller supplies the control URLs.
+  let controlSelf: IdorObservation['controlSelf'];
+  if (input.ownResourceUrl !== undefined) {
+    const c = signalFrom(await send({ ...base, url: input.ownResourceUrl, headers: input.lowPrivilege.headers }));
+    if (!c.ok) return { kind: 'not_sent', reason: c.notSent };
+    controlSelf = c.signal;
+  }
+  let controlAbsent: IdorObservation['controlAbsent'];
+  if (input.absentResourceUrl !== undefined) {
+    const c = signalFrom(await send({ ...base, url: input.absentResourceUrl, headers: input.lowPrivilege.headers }));
+    if (!c.ok) return { kind: 'not_sent', reason: c.notSent };
+    controlAbsent = c.signal;
+  }
 
   return {
     kind: 'observed',
@@ -48,6 +65,8 @@ export async function idorCompare(send: SendFn, input: IdorCompareInput): Promis
       method: target.method,
       lowPrivilege: low.signal,
       highPrivilege: high.signal,
+      ...(controlSelf !== undefined ? { controlSelf } : {}),
+      ...(controlAbsent !== undefined ? { controlAbsent } : {}),
     },
   };
 }

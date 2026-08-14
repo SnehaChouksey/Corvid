@@ -101,6 +101,12 @@ export const idorObservationSchema = z
     /** The same request issued under the two analyst-supplied sessions at different privilege (D-1). */
     lowPrivilege: responseSignalSchema,
     highPrivilege: responseSignalSchema,
+    // Controls (D-15) — the low-privilege session against a resource it legitimately owns (must
+    // succeed) and against a non-existent id (must fail). Without them, "A read this object" cannot
+    // be told apart from A reading its own resource or a universal-200 endpoint. Optional on the wire
+    // (older observations parse), but the verifier requires them to confirm.
+    controlSelf: responseSignalSchema.optional(),
+    controlAbsent: responseSignalSchema.optional(),
   })
   .strict();
 export type IdorObservation = z.infer<typeof idorObservationSchema>;

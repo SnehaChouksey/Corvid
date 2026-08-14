@@ -511,6 +511,9 @@ importers:
       '@corvid/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@corvid/verify':
+        specifier: workspace:*
+        version: link:../verify
       '@types/node':
         specifier: ^24.9.0
         version: 24.13.3
