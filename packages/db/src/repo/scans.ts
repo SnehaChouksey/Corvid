@@ -80,7 +80,13 @@ export async function countActiveScansForOwner(db: Database, ownerId: string): P
  */
 export async function createScanWithinCap(
   db: Database,
-  params: { readonly ownerId: string; readonly targetId: string; readonly cap: number },
+  params: {
+    readonly ownerId: string;
+    readonly targetId: string;
+    readonly cap: number;
+    /** Opaque ciphertext of the scan's `ScanCredentials` (D-1), or omitted for none. */
+    readonly credentialsEncrypted?: string;
+  },
 ): Promise<ScanRow | null> {
   return db.transaction(async (tx) => {
     // Serialize concurrent scan-creation per owner for the duration of the transaction.
@@ -92,7 +98,14 @@ export async function createScanWithinCap(
     }
     const inserted = await tx
       .insert(scans)
-      .values({ ownerId: params.ownerId, targetId: params.targetId, status: 'authorizing' })
+      .values({
+        ownerId: params.ownerId,
+        targetId: params.targetId,
+        status: 'authorizing',
+        ...(params.credentialsEncrypted !== undefined
+          ? { credentialsEncrypted: params.credentialsEncrypted }
+          : {}),
+      })
       .returning();
     return inserted[0] ?? null;
   });

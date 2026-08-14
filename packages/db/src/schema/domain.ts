@@ -51,6 +51,11 @@ export const scans = pgTable('scans', {
   completedAt: timestamp('completed_at', { withTimezone: true }),
   // The LangGraph thread id (= scan id); the durable checkpointer keys on it (ADR-27).
   workflowId: text('workflow_id'),
+  // Analyst-supplied target credentials (D-1, ADR-D1), ENCRYPTED at rest (@corvid/crypto,
+  // AES-256-GCM). The plaintext is a `ScanCredentials` JSON; it is decrypted only transiently at use
+  // by the crawler/testers (`02` §7) and NEVER logged (§5). Null = no credentials (unauthenticated
+  // surface only). Opaque ciphertext here — the DB layer never sees plaintext.
+  credentialsEncrypted: text('credentials_encrypted'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

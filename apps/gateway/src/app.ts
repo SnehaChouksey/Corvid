@@ -33,6 +33,7 @@ import {
   verifyProofOfControl,
 } from '@corvid/proof-of-control';
 import { parseScopeRules } from '@corvid/scope';
+import { type ScanCredentials, scanCredentialsSchema } from '@corvid/tool-contracts';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { zValidator } from '@hono/zod-validator';
 import { type Context, Hono } from 'hono';
@@ -82,6 +83,12 @@ export interface AppDeps {
    * so the gateway stays testable offline; the composition root wires node:dns/promises + fetch.
    */
   readonly proofPorts: ProofPorts;
+  /**
+   * Encrypt analyst-supplied scan credentials for storage at rest (D-1). Injected (a @corvid/crypto
+   * cipher bound to ENCRYPTION_KEY in the composition root) so the gateway holds no key material and
+   * the plaintext never leaves this call. Returns opaque ciphertext.
+   */
+  readonly encryptCredentials: (credentials: ScanCredentials) => string;
 }
 
 export type AppEnv = { Variables: { userId: string } };
@@ -318,11 +325,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     });
   });
 
-  const createScanSchema = z.object({ targetId: z.uuid() }).strict();
+  // `credentials` is accepted as unknown here and parsed with the shared schema below, NOT via
+  // zValidator — a zValidator failure echoes the offending input in its response, and this input is
+  // secret material (§5). We validate it separately and never reflect its contents.
+  const createScanSchema = z.object({ targetId: z.uuid(), credentials: z.unknown().optional() }).strict();
 
   api.post('/scans', zValidator('json', createScanSchema), async (c) => {
     const userId = c.get('userId');
-    const { targetId } = c.req.valid('json');
+    const { targetId, credentials } = c.req.valid('json');
 
     const target = await getTargetForOwner(deps.db, userId, targetId);
     if (target === undefined) {
@@ -334,12 +344,25 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!(confirmedAt instanceof Date) || Number.isNaN(confirmedAt.getTime())) {
       throw new AuthorizationError('Target is not authorized for scanning');
     }
+
+    // D-1: validate + encrypt analyst-supplied credentials before they touch the DB. A parse failure
+    // is a generic 400 with NO issue detail — the issues could reflect the secret back (§5).
+    let credentialsEncrypted: string | undefined;
+    if (credentials !== undefined) {
+      const parsed = scanCredentialsSchema.safeParse(credentials);
+      if (!parsed.success) {
+        throw new HTTPException(400, { message: 'Invalid credentials' });
+      }
+      credentialsEncrypted = deps.encryptCredentials(parsed.data);
+    }
+
     // Per-user concurrent-scan cap (ADR-20), enforced ATOMICALLY at workflow start — the count and
     // insert share one advisory-locked transaction so parallel starts can't fail open. null = capped.
     const scan = await createScanWithinCap(deps.db, {
       ownerId: userId,
       targetId,
       cap: deps.limits.concurrentScanCap,
+      ...(credentialsEncrypted !== undefined ? { credentialsEncrypted } : {}),
     });
     if (scan === null) {
       return c.json({ error: 'concurrent_scan_cap_reached', cap: deps.limits.concurrentScanCap }, 429);

@@ -1,6 +1,7 @@
 import { lookup, resolveTxt } from 'node:dns/promises';
 
 import { createAuth } from '@corvid/auth';
+import { createCipher, loadKey } from '@corvid/crypto';
 import { createDb } from '@corvid/db';
 import { createLogger } from '@corvid/logger';
 import type { ProofPorts } from '@corvid/proof-of-control';
@@ -37,6 +38,8 @@ const proofPorts: ProofPorts = {
 const env = loadEnv();
 const logger = createLogger({ level: env.LOG_LEVEL, service: 'gateway' });
 const { db } = createDb(env.DATABASE_URL);
+// Bind the credential cipher once at boot; loadKey fails closed on a bad/short key (§9).
+const credentialCipher = createCipher(loadKey(env.ENCRYPTION_KEY));
 const auth = createAuth({
   database: db,
   secret: env.BETTER_AUTH_SECRET,
@@ -65,6 +68,8 @@ const app = createApp({
   },
   logger,
   proofPorts,
+  // Serialize then encrypt; the plaintext credentials never leave this closure or reach a log.
+  encryptCredentials: (credentials) => credentialCipher.encrypt(JSON.stringify(credentials)),
   ...(rateLimitStore !== undefined ? { rateLimitStore } : {}),
 });
 

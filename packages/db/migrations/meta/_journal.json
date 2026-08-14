@@ -50,6 +50,13 @@
       "when": 1786731350671,
       "tag": "0006_fantastic_junta",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786741377261,
+      "tag": "0007_green_lyja",
+      "breakpoints": true
     }
   ]
 }

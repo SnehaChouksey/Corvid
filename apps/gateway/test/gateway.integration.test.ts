@@ -1,7 +1,9 @@
 import { strict as assert } from 'node:assert';
+import { randomBytes } from 'node:crypto';
 import { after, before, test } from 'node:test';
 
 import { createAuth, type Auth } from '@corvid/auth';
+import { createCipher } from '@corvid/crypto';
 import { createDb, type DbHandle, runMigrations, schema } from '@corvid/db';
 import { createLogger } from '@corvid/logger';
 import type { ProofPorts } from '@corvid/proof-of-control';
@@ -56,8 +58,12 @@ function runIntegrationTests(databaseUrl: string): void {
     resolveHostIps: async () => ['93.184.216.34'],
     fetchText: async () => ({ ok: false, status: 404, body: '' }),
   };
+  // A real cipher with a throwaway key, so the credential path is proven end to end (encrypt on the
+  // way in, decrypt to assert the round-trip).
+  const cipher = createCipher(randomBytes(32));
+  const encryptCredentials = (creds: unknown): string => cipher.encrypt(JSON.stringify(creds));
   const makeApp = (limits: AppLimits, proofPorts: ProofPorts = noProof): Hono<AppEnv> =>
-    createApp({ auth, db: handle.db, limits, logger, proofPorts });
+    createApp({ auth, db: handle.db, limits, logger, proofPorts, encryptCredentials });
   const defaultLimits: AppLimits = { windowMs: 60_000, max: 100, authMax: 100, concurrentScanCap: 5 };
 
   async function signUp(app: Hono<AppEnv>, email: string): Promise<string> {
@@ -303,6 +309,64 @@ function runIntegrationTests(databaseUrl: string): void {
     }
   });
 
+  test('D-1: scan credentials are stored encrypted and round-trip (Unit 6)', async () => {
+    const app = makeApp(defaultLimits);
+    const cookie = await signUp(app, `creds-${Date.now()}@example.com`);
+    const id = await createTarget(app, cookie, 'creds.example.com');
+    await handle.db
+      .update(schema.targets)
+      .set({ authorizationConfirmedAt: new Date() })
+      .where(eq(schema.targets.id, id));
+
+    const credentials = {
+      jwtSample: 'eyJhbGciOiJIUzI1NiJ9.e30.sig',
+      crawlLogin: { loginUrl: 'https://creds.example.com/login', username: 'analyst', password: 'sup3r-secret' },
+      idorSessions: {
+        primary: { label: 'admin', headers: { Cookie: 'session=admin-token' } },
+        secondary: { label: 'user', headers: { Cookie: 'session=user-token' } },
+      },
+    };
+
+    const res = await app.request(
+      '/api/scans',
+      authed(cookie, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetId: id, credentials }),
+      }),
+    );
+    assert.equal(res.status, 201);
+    const { id: scanId } = (await res.json()) as { id: string };
+
+    const rows = await handle.db.select().from(schema.scans).where(eq(schema.scans.id, scanId));
+    const stored = rows[0]?.credentialsEncrypted;
+    assert.ok(typeof stored === 'string' && stored.length > 0, 'credentials should be persisted');
+    assert.ok(!stored.includes('sup3r-secret'), 'plaintext must not be present in storage'); // encrypted, not raw
+    assert.deepEqual(JSON.parse(cipher.decrypt(stored)), credentials); // round-trips exactly
+  });
+
+  test('malformed scan credentials are refused without echoing them (§5)', async () => {
+    const app = makeApp(defaultLimits);
+    const cookie = await signUp(app, `badcreds-${Date.now()}@example.com`);
+    const id = await createTarget(app, cookie, 'badcreds.example.com');
+    await handle.db
+      .update(schema.targets)
+      .set({ authorizationConfirmedAt: new Date() })
+      .where(eq(schema.targets.id, id));
+
+    const res = await app.request(
+      '/api/scans',
+      authed(cookie, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetId: id, credentials: { jwtSample: 12345 } }), // wrong type
+      }),
+    );
+    assert.equal(res.status, 400);
+    const bodyText = await res.text();
+    assert.ok(!bodyText.includes('12345'), 'the rejected value must not be reflected'); // §5
+  });
+
   test('list endpoints return only the caller`s own rows', async () => {
     const app = makeApp(defaultLimits);
     const cookieA = await signUp(app, `lista-${Date.now()}@example.com`);
@@ -338,6 +402,7 @@ function runIntegrationTests(databaseUrl: string): void {
           limits: { ...defaultLimits, max: 2 },
           logger,
           proofPorts: noProof,
+          encryptCredentials,
           rateLimitStore: store,
         });
         const cookie = await signUp(app, `redisrl-${Date.now()}@example.com`);
