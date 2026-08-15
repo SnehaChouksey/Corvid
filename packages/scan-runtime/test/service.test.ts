@@ -84,7 +84,7 @@ test('submitApproval records the decision then resumes to completion', async () 
 
   assert.deepEqual(outcome, { kind: 'accepted', approved: ['h1'], rejected: ['h2'] });
   assert.deepEqual(h.recordApprovalArgs, { scanId: 'scan-2', ownerId: 'user-1', approved: ['h1'] });
-  assert.equal(h.statuses.at(-1), 'completed'); // resumed test→verify→complete
+  assert.equal(h.statuses.at(-1), 'reporting'); // resumed test→verify→report (completion is the report worker, ADR-34)
 });
 
 test('submitApproval does NOT resume when the decision is not accepted', async () => {

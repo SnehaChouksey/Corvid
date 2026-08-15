@@ -70,7 +70,7 @@ function runIntegrationTest(databaseUrl: string): void {
       assert.equal((snapshot.values as ScanStateType).status, 'awaiting_approval');
 
       const done = await graph.invoke(new Command({ resume: { approvedHypotheses: ['h1'] } }), config);
-      assert.equal(done.status, 'completed');
+      assert.equal(done.status, 'reporting'); // graph ends at reporting; the report worker completes it (ADR-34)
       assert.deepEqual(done.approvedHypotheses, ['h1']);
     } finally {
       await b.close();

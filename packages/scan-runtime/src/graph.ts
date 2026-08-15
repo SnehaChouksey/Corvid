@@ -176,7 +176,11 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
         }
         return { verifiedCount: verified, pendingOob: [] as PendingOob[] };
       })
-      .addNode('complete', () => ({ status: 'completed' as const }))
+      // Terminal graph node: the scan enters `reporting` (`02` §5.1) and the graph ends. It does NOT
+      // set `completed` — the report fan-out (ADR-17/ADR-34) does, only after the report is durably
+      // stored, so `completed` always means "the report exists". The gateway enqueues the durable
+      // report job when it observes this `reporting` status (idempotent, jobId per scan).
+      .addNode('report', () => ({ status: 'reporting' as const }))
       .addEdge(START, 'authorize')
       .addEdge('authorize', 'crawl')
       .addEdge('crawl', 'perceive')
@@ -196,10 +200,10 @@ export function buildScanGraph(checkpointer: BaseCheckpointSaver, deps: ScanGrap
       // Blind SSRF present → wait out of band; otherwise the synchronous verdicts are final.
       .addConditionalEdges('verify', (state) => (state.pendingOob.length > 0 ? 'await' : 'done'), {
         await: 'awaitOob',
-        done: 'complete',
+        done: 'report',
       })
-      .addEdge('awaitOob', 'complete')
-      .addEdge('complete', END)
+      .addEdge('awaitOob', 'report')
+      .addEdge('report', END)
       .compile({ checkpointer })
   );
 }

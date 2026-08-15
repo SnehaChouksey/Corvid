@@ -170,7 +170,7 @@ test('the sync gate persists a verified finding and skips a not_confirmed observ
   assert.equal(persisted.length, 1, 'only the verified observation becomes a finding');
   assert.equal(persisted[0]?.hypothesisId, 'h-verified');
   assert.equal(persisted[0]?.vulnClass, 'jwt');
-  assert.equal((result as { status?: string }).status, 'completed');
+  assert.equal((result as { status?: string }).status, 'reporting');
   assert.equal((result as { verifiedCount?: number }).verifiedCount, 1);
 });
 
@@ -202,7 +202,7 @@ test('blind SSRF pauses at the OOB wait, then verifies on a correlated callback'
   const done = await graph.invoke(new Command({ resume: { timedOut: true } }), cfg);
   assert.equal(persisted.length, 1);
   assert.equal(persisted[0]?.vulnClass, 'ssrf');
-  assert.equal((done as { status?: string }).status, 'completed');
+  assert.equal((done as { status?: string }).status, 'reporting');
 });
 
 test('blind SSRF with no callback marks not confirmed at the wait — no finding', async () => {
@@ -224,6 +224,6 @@ test('blind SSRF with no callback marks not confirmed at the wait — no finding
   const done = await graph.invoke(new Command({ resume: { timedOut: true } }), cfg);
 
   assert.equal(persisted.length, 0, 'a suppressed callback is not confirmed — never a finding');
-  assert.equal((done as { status?: string }).status, 'completed');
+  assert.equal((done as { status?: string }).status, 'reporting');
   assert.equal((done as { verifiedCount?: number }).verifiedCount, 0);
 });
