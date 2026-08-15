@@ -3,6 +3,7 @@
 // desktop; a hamburger that morphs into an X and opens a full-screen glass
 // overlay on mobile, with links staggering in.
 import { BUTTON_PRIMARY_SM, LINK_QUIET } from '../lib/styles';
+import { SIGN_IN_URL, SIGN_UP_URL } from '../lib/config';
 
 // Root-relative so these still resolve (not dead links) on /privacy and /terms,
 // which don't have these section ids. On the home page a same-path hash link
@@ -42,7 +43,10 @@ const links = [
       }
     </div>
 
-    <a href="/#early-access" class={`hidden md:inline-flex ${BUTTON_PRIMARY_SM}`}>Request early access</a>
+    <div class="hidden items-center gap-1 md:flex">
+      <a href={SIGN_IN_URL} class={`px-3 py-2 ${LINK_QUIET}`}>Sign in</a>
+      <a href={SIGN_UP_URL} class={BUTTON_PRIMARY_SM}>Get started</a>
+    </div>
 
     <button
       id="nav-toggle"
@@ -83,14 +87,24 @@ const links = [
       ))
     }
   </nav>
-  <a
-    href="/#early-access"
-    data-menu-link
-    style={`transition-delay:${100 + links.length * 50}ms`}
-    class={`menu-link ${BUTTON_PRIMARY_SM}`}
-  >
-    Request early access
-  </a>
+  <div class="flex flex-col items-center gap-6">
+    <a
+      href={SIGN_IN_URL}
+      data-menu-link
+      style={`transition-delay:${100 + links.length * 50}ms`}
+      class="menu-link text-lg font-semibold text-fog transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] hover:text-chalk focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+    >
+      Sign in
+    </a>
+    <a
+      href={SIGN_UP_URL}
+      data-menu-link
+      style={`transition-delay:${100 + (links.length + 1) * 50}ms`}
+      class={`menu-link ${BUTTON_PRIMARY_SM}`}
+    >
+      Get started
+    </a>
+  </div>
 </div>
 
 <style>

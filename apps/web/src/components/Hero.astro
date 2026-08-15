@@ -4,7 +4,8 @@
 // imagery). Heading + subheading capped at max-w for the 680px rule.
 import { Icon } from 'astro-icon/components';
 import SectionReveal from './SectionReveal.astro';
-import EmailCapture from './EmailCapture.astro';
+import { BUTTON_PRIMARY } from '../lib/styles';
+import { SIGN_UP_URL } from '../lib/config';
 ---
 
 <section id="hero" class="relative overflow-hidden px-6 pb-24 pt-24">
@@ -26,8 +27,8 @@ import EmailCapture from './EmailCapture.astro';
       </SectionReveal>
 
       <SectionReveal delay={200}>
-        <div class="mt-10" id="early-access">
-          <EmailCapture id="hero" />
+        <div class="mt-10">
+          <a href={SIGN_UP_URL} class={BUTTON_PRIMARY}>Get started</a>
           <p class="mt-4 flex items-center gap-2 text-sm text-ash">
             <Icon name="ph:shield-check" class="h-4 w-4 shrink-0 text-signal" aria-hidden="true" />
             One rule the whole product lives by, zero unverified findings.
