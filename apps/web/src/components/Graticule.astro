@@ -1,0 +1,32 @@
+---
+// Decorative measurement grid — the instrument-panel graticule behind the
+// hero and the coverage/proof sections. A tiled SVG <pattern> of hairlines,
+// not a CSS gradient (skill B4 bans gradient backgrounds; this is a flat,
+// repeating line pattern, not a color fade). Purely presentational: aria
+// hidden, pointer-events none, never carries content.
+interface Props {
+  class?: string;
+  /** Line opacity, kept low so it reads as texture, not decoration fighting content. */
+  opacity?: number;
+}
+
+const { class: className = '', opacity = 0.05 } = Astro.props;
+
+// Each instance needs its own pattern id — two Graticules on one page would
+// otherwise collide on id="graticule" (invalid HTML, ambiguous url() ref).
+const patternId = `graticule-${Math.random().toString(36).slice(2, 9)}`;
+---
+
+<svg
+  class:list={['pointer-events-none absolute inset-0 h-full w-full', className]}
+  aria-hidden="true"
+  focusable="false"
+  preserveAspectRatio="none"
+>
+  <defs>
+    <pattern id={patternId} width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48,0 L0,0 0,48" fill="none" stroke="var(--color-fog)" stroke-width="1" />
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill={`url(#${patternId})`} opacity={opacity} />
+</svg>

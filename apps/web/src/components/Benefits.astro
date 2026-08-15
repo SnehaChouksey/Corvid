@@ -1,60 +1,71 @@
 ---
-// Benefits (copy spec §4): 5 cards, bold benefit + supporting detail.
+// Why analysts keep it running — a composed, unequal layout instead of a
+// row of identical icon+heading+text cards. One benefit gets the weight it
+// actually deserves (nothing to triage is the whole pitch); the rest read
+// as smaller supporting readings underneath it.
 import { Icon } from 'astro-icon/components';
 import SectionReveal from './SectionReveal.astro';
-
-const benefits = [
-  {
-    icon: 'ph:check-square-offset',
-    title: 'Nothing to triage',
-    detail:
-      'Every finding ships with the exact request that reproduces it, so your team stops learning to ignore the scanner.',
-  },
-  {
-    icon: 'ph:brain',
-    title: "A pentester's reasoning at machine scale",
-    detail: 'It reasons about your actual auth flow, not a regex on a response header.',
-  },
-  {
-    icon: 'ph:hand-palm',
-    title: 'You approve every active test',
-    detail: 'Passive crawling runs on its own. No live payload leaves until a human says go.',
-  },
-  {
-    icon: 'ph:scales',
-    title: 'Proof, not opinion',
-    detail: 'A non-LLM check gets the final word. The model proposes; it never decides a vulnerability is real.',
-  },
-  {
-    icon: 'ph:lock-key',
-    title: "It can't wander off-target",
-    detail:
-      'Egress is allow-listed to your target and the callback listener, enforced at the sandbox firewall, not in app code.',
-  },
-];
 ---
 
 <section id="benefits" class="px-6 py-24">
   <div class="mx-auto max-w-6xl">
     <SectionReveal>
-      <p class="text-sm font-semibold uppercase tracking-wide text-signal">Why analysts keep it running</p>
-      <h2 class="mt-4 max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
+      <h2 class="max-w-[720px] text-balance font-display text-3xl font-semibold text-chalk sm:text-5xl">
         Built to earn trust one verified finding at a time
       </h2>
     </SectionReveal>
 
-    <div class="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-      {
-        benefits.map((benefit, i) => (
-          <SectionReveal delay={(i % 3) * 80} class="h-full">
-            <article class="h-full rounded-2xl border border-steel bg-coal p-8 transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:border-signal/40">
-              <Icon name={benefit.icon} class="h-6 w-6 text-signal" aria-hidden="true" />
-              <h3 class="mt-4 text-lg font-semibold text-chalk">{benefit.title}</h3>
-              <p class="mt-3 text-pretty text-fog">{benefit.detail}</p>
-            </article>
-          </SectionReveal>
-        ))
-      }
+    <div class="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-12">
+      <SectionReveal class="lg:col-span-7">
+        <article class="h-full border border-signal/30 bg-graphite p-9 sm:p-11">
+          <Icon name="ph:check-square-offset" class="h-8 w-8 text-signal" aria-hidden="true" />
+          <h3 class="mt-6 max-w-[420px] text-balance text-2xl font-semibold text-chalk sm:text-3xl">
+            Nothing to triage
+          </h3>
+          <p class="mt-4 max-w-[440px] text-pretty text-lg text-fog">
+            Every finding ships with the exact request that reproduces it, so your team stops learning to
+            ignore the scanner.
+          </p>
+        </article>
+      </SectionReveal>
+
+      <SectionReveal delay={80} class="lg:col-span-5">
+        <article class="h-full border border-steel bg-coal p-9 sm:p-11">
+          <Icon name="ph:scales" class="h-7 w-7 text-ash" aria-hidden="true" />
+          <h3 class="mt-6 text-xl font-semibold text-chalk">Proof, not opinion</h3>
+          <p class="mt-3 text-pretty text-fog">
+            A non-LLM check gets the final word. The model proposes; it never decides a vulnerability is real.
+          </p>
+        </article>
+      </SectionReveal>
+
+      <SectionReveal delay={120} class="lg:col-span-4">
+        <article class="h-full border border-steel bg-coal p-7">
+          <Icon name="ph:brain" class="h-6 w-6 text-ash" aria-hidden="true" />
+          <h3 class="mt-4 text-lg font-semibold text-chalk">A pentester's reasoning, at machine scale</h3>
+          <p class="mt-3 text-pretty text-fog">It reasons about your actual auth flow, not a regex on a header.</p>
+        </article>
+      </SectionReveal>
+
+      <SectionReveal delay={160} class="lg:col-span-4">
+        <article class="h-full border border-steel bg-coal p-7">
+          <Icon name="ph:hand-palm" class="h-6 w-6 text-ash" aria-hidden="true" />
+          <h3 class="mt-4 text-lg font-semibold text-chalk">You approve every active test</h3>
+          <p class="mt-3 text-pretty text-fog">
+            Passive crawling runs on its own. No live payload leaves until a human says go.
+          </p>
+        </article>
+      </SectionReveal>
+
+      <SectionReveal delay={200} class="lg:col-span-4">
+        <article class="h-full border border-steel bg-coal p-7">
+          <Icon name="ph:lock-key" class="h-6 w-6 text-ash" aria-hidden="true" />
+          <h3 class="mt-4 text-lg font-semibold text-chalk">It can't wander off-target</h3>
+          <p class="mt-3 text-pretty text-fog">
+            Egress is allow-listed to your target and the callback listener, enforced at the sandbox firewall.
+          </p>
+        </article>
+      </SectionReveal>
     </div>
   </div>
 </section>

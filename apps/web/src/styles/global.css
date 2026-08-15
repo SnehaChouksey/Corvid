@@ -1,13 +1,17 @@
-/* Self-hosted Geist (skill B1: approved typeface, no Inter/Arial). Variable fonts,
-   so one file covers every weight we use (regular through semibold — never black). */
+/* Self-hosted Geist (skill B1: approved typeface, no Inter/Arial) for body/UI
+   text, plus Geist Mono for every real signal/log/request. Bricolage Grotesque
+   is the one sanctioned display face (redesign direction contract, Base.astro)
+   for oversized cinematic headlines only — never for body copy or UI chrome. */
 @import '@fontsource-variable/geist';
 @import '@fontsource-variable/geist-mono';
+@import '@fontsource-variable/bricolage-grotesque';
 @import 'tailwindcss';
 
 /* Dark theme is the default for the site (security tooling reads better on ink). */
 @theme {
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Geist Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+  --font-display: 'Bricolage Grotesque Variable', 'Geist Variable', ui-sans-serif, sans-serif;
 
   /* Approved dark backgrounds only (skill B4). Flat, never gradients. */
   --color-ink: #000000;
@@ -17,13 +21,16 @@
   --color-steel: #313131;
   --color-umber: #131209;
 
-  /* Text ramp used by the hero gradient (skill B5) and body copy. */
+  /* Text ramp for body copy. */
   --color-chalk: #ffffff;
   --color-ash: #9b9b9b;
   --color-fog: #b4b4b4;
 
-  /* Single restrained accent for CTAs/focus — not in the bg palette, used on text/borders only. */
-  --color-signal: #7dd3fc;
+  /* Signal-capture world: a warm phosphor amber, the color of a trace that has
+     just locked onto a stable reading. Single restrained accent — used on
+     text/borders/glyphs only, never as a background fill (skill B4). */
+  --color-signal: #ffb238;
+  --color-signal-dim: #6b4a1f;
 }
 
 :root {
@@ -40,6 +47,30 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Shared keyframes reused across the signal pipeline, the sealed finding
+   record, and the final CTA (three sites — kept here once instead of
+   duplicated per component <style> block). */
+@keyframes seal-stamp {
+  0% {
+    transform: scale(0.85) rotate(-6deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08) rotate(-6deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(-6deg);
+    opacity: 1;
+  }
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 /* Respect reduced-motion: the scroll reveals and word-by-word tagline (skill B7/B11)

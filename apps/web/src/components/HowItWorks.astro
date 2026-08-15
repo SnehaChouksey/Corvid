@@ -1,7 +1,10 @@
 ---
-// How it works (copy spec §6): 3 numbered steps.
+// How it works: three steps, but not three identical cards. The middle
+// step, the human approval gate, is the actual trust differentiator, so it
+// gets more scale and the one amber border on the page outside the hero.
 import { Icon } from 'astro-icon/components';
 import SectionReveal from './SectionReveal.astro';
+import { CHANNEL_LABEL } from '../lib/styles';
 
 const steps = [
   {
@@ -10,12 +13,13 @@ const steps = [
     detail: 'Prove control of the target, then Corvid passively maps it. No payloads yet.',
   },
   {
-    icon: 'ph:lightbulb',
+    icon: 'ph:hand-palm',
     title: 'Hypothesize and approve',
-    detail: 'It proposes candidate vulnerabilities with rationale. You approve which ones may be tested.',
+    detail:
+      'It proposes candidate vulnerabilities with rationale. You approve which ones may be tested, one at a time.',
   },
   {
-    icon: 'ph:check-circle',
+    icon: 'ph:waveform',
     title: 'Test and verify',
     detail:
       'Approved tests fire in the sandbox. A deterministic signal confirms the exploit before it is ever called a finding.',
@@ -26,25 +30,34 @@ const steps = [
 <section id="how-it-works" class="px-6 py-24">
   <div class="mx-auto max-w-6xl">
     <SectionReveal>
-      <p class="text-sm font-semibold uppercase tracking-wide text-signal">The loop</p>
-      <h2 class="mt-4 max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
+      <h2 class="max-w-[720px] text-balance font-display text-3xl font-semibold text-chalk sm:text-5xl">
         How it works, from authorization to a verified finding
       </h2>
     </SectionReveal>
 
-    <ol class="mt-12 grid gap-6 md:grid-cols-3">
+    <ol class="mt-14 flex flex-col gap-6 md:flex-row md:items-stretch">
       {
         steps.map((step, i) => (
-          <SectionReveal delay={i * 120} as="li" class="h-full">
-            <div class="h-full rounded-2xl border border-steel bg-coal p-8">
-              <div class="flex items-center gap-3">
-                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-signal/30 font-mono text-sm text-signal">
-                  {i + 1}
-                </span>
-                <Icon name={step.icon} class="h-5 w-5 text-ash" aria-hidden="true" />
+          <SectionReveal
+            as="li"
+            delay={i * 140}
+            class={i === 1 ? 'relative md:flex-[1.25]' : 'relative md:flex-1'}
+          >
+            <div
+              class:list={[
+                'step relative h-full border p-7',
+                i === 1 ? 'border-signal/50 bg-graphite py-9' : 'border-steel bg-coal',
+              ]}
+            >
+              {i > 0 && <span class="pointer-events-none absolute -left-6 top-1/2 hidden h-px w-6 -translate-y-1/2 bg-steel md:block" aria-hidden="true" />}
+              <p class={CHANNEL_LABEL}>CH.0{i + 1}</p>
+              <div class="mt-4 flex items-center gap-3">
+                <Icon name={step.icon} class={i === 1 ? 'h-6 w-6 text-signal' : 'h-5 w-5 text-ash'} aria-hidden="true" />
+                <h3 class={i === 1 ? 'text-2xl font-semibold text-chalk' : 'text-lg font-semibold text-chalk'}>
+                  {step.title}
+                </h3>
               </div>
-              <h3 class="mt-4 text-lg font-semibold text-chalk">{step.title}</h3>
-              <p class="mt-3 text-pretty text-fog">{step.detail}</p>
+              <p class="mt-3 max-w-[320px] text-pretty text-fog">{step.detail}</p>
             </div>
           </SectionReveal>
         ))

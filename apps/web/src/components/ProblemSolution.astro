@@ -1,52 +1,116 @@
 ---
-// Problem → solution, one section (copy spec §3). Two flat cards for the
-// failure modes, one reveal for the bridging claim.
-import { Icon } from 'astro-icon/components';
+// The gap in appsec tooling, shown as two literal signal readings rather
+// than a pair of identical icon+heading+text cards: a noisy trace (pattern
+// matching, mostly false alarms) against a sparse one (accurate, rare).
 import SectionReveal from './SectionReveal.astro';
+
+const NOISY_TRACE =
+  'M0,60 L20,38 L35,82 L50,28 L60,92 L75,44 L90,70 L100,18 L115,96 L130,54 L145,32 L160,86 L175,48 L190,22 L205,76 L220,38 L235,96 L250,28 L265,62 L280,42 L295,82 L310,32 L325,66 L340,48 L355,90 L370,38 L385,70 L400,58';
+
+const SPARSE_TRACE =
+  'M0,60 L58,60 L64,60 L70,14 L76,60 L148,60 L154,60 L160,102 L166,60 L258,60 L264,60 L270,22 L276,60 L400,60';
 ---
 
 <section id="approach" class="px-6 py-24">
   <div class="mx-auto max-w-6xl">
     <SectionReveal>
-      <p class="text-sm font-semibold uppercase tracking-wide text-signal">The gap in appsec tooling</p>
-      <h2 class="mt-4 max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
-        Two ways to test an application today. Neither one closes the gap.
+      <h2 class="max-w-[720px] text-balance font-display text-3xl font-semibold text-chalk sm:text-5xl">
+        Two ways to test an app today. Neither closes the gap.
       </h2>
     </SectionReveal>
 
-    <div class="mt-12 grid gap-6 md:grid-cols-2">
+    <div class="mt-16 grid gap-16 md:grid-cols-2 md:gap-12">
       <SectionReveal delay={80}>
-        <article class="h-full rounded-2xl border border-steel bg-coal p-8">
-          <Icon name="ph:funnel-simple" class="h-6 w-6 text-ash" aria-hidden="true" />
-          <h3 class="mt-4 text-xl font-semibold text-chalk">Rule-based scanners</h3>
-          <p class="mt-3 text-pretty text-fog">
-            They pattern match: a version string, a header, a regex. They cannot tell whether the thing they
-            flagged is actually exploitable, so they flood you with false positives until your team learns
-            to ignore the scanner entirely.
+        <div>
+          <svg
+            viewBox="0 0 400 120"
+            class="h-24 w-full text-steel"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d={NOISY_TRACE} fill="none" stroke="currentColor" stroke-width="2" />
+          </svg>
+          <h3 class="mt-6 text-xl font-semibold text-chalk">Rule based scanners</h3>
+          <p class="mt-3 max-w-[440px] text-pretty text-fog">
+            A version string, a header, a regex, that is the whole test. They cannot tell whether the thing
+            they flagged is exploitable, so the trace stays noisy and your team learns to stop reading it.
           </p>
-        </article>
+        </div>
       </SectionReveal>
 
       <SectionReveal delay={160}>
-        <article class="h-full rounded-2xl border border-steel bg-coal p-8">
-          <Icon name="ph:user-focus" class="h-6 w-6 text-ash" aria-hidden="true" />
-          <h3 class="mt-4 text-xl font-semibold text-chalk">Manual pentesting</h3>
-          <p class="mt-3 text-pretty text-fog">
-            A skilled tester reasons correctly about your application, but that reasoning does not scale. One
-            engagement covers a slice of the surface, on a schedule measured in months, not requests.
+        <div>
+          <svg
+            viewBox="0 0 400 120"
+            class="h-24 w-full text-steel"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d={SPARSE_TRACE} fill="none" stroke="currentColor" stroke-width="2" />
+          </svg>
+          <h3 class="mt-6 text-xl font-semibold text-chalk">Manual pentesting</h3>
+          <p class="mt-3 max-w-[440px] text-pretty text-fog">
+            A skilled tester reasons correctly about your application. The trace is clean, but it only reads
+            once an engagement, on a slice of the surface, not the whole system between visits.
           </p>
-        </article>
+        </div>
       </SectionReveal>
     </div>
 
-    <SectionReveal delay={100}>
-      <div class="mt-12 max-w-[680px] rounded-2xl border border-signal/30 bg-graphite p-8">
-        <p class="text-pretty text-lg text-fog">
-          Corvid automates the reasoning loop of hypothesizing, testing, and verifying, while keeping
-          verification deterministic. Reasoning is agentic. Verification is deterministic engineering. The
-          model proposes; a non-LLM check decides.
+    <SectionReveal delay={120}>
+      <div class="relative mt-16 max-w-[680px] border border-steel bg-coal/60 p-8">
+        <span class="corner-tick corner-tick--tl" aria-hidden="true"></span>
+        <span class="corner-tick corner-tick--tr" aria-hidden="true"></span>
+        <span class="corner-tick corner-tick--bl" aria-hidden="true"></span>
+        <span class="corner-tick corner-tick--br" aria-hidden="true"></span>
+        <p class="font-mono text-xs tracking-wider text-signal">CH.CORVID</p>
+        <p class="mt-3 text-pretty text-lg text-fog">
+          Corvid automates the reasoning loop, hypothesize, test, verify, and keeps verification deterministic.
+          Reasoning is agentic. Verification is engineering. The model proposes; a non LLM check decides.
         </p>
       </div>
     </SectionReveal>
   </div>
 </section>
+
+<style>
+  /* Instrument-screen corner brackets — a bezel detail, not a decorative
+     glow: flat lines, no blur, no color fade. */
+  .corner-tick {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-color: var(--color-signal);
+    opacity: 0.6;
+  }
+  .corner-tick--tl {
+    top: -1px;
+    left: -1px;
+    border-top: 2px solid;
+    border-left: 2px solid;
+    border-color: var(--color-signal);
+  }
+  .corner-tick--tr {
+    top: -1px;
+    right: -1px;
+    border-top: 2px solid;
+    border-right: 2px solid;
+    border-color: var(--color-signal);
+  }
+  .corner-tick--bl {
+    bottom: -1px;
+    left: -1px;
+    border-bottom: 2px solid;
+    border-left: 2px solid;
+    border-color: var(--color-signal);
+  }
+  .corner-tick--br {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 2px solid;
+    border-right: 2px solid;
+    border-color: var(--color-signal);
+  }
+</style>

@@ -1,0 +1,192 @@
+---
+// The signature hero moment: a hypothesis travels through approve, sandbox,
+// and deterministic verify, and locks into a PROVEN seal. Built with an SVG
+// trace (stroke-dashoffset draw-in + a dot riding the same path via
+// offset-path), vanilla TS, and IntersectionObserver — no animation library.
+//
+// Progressive enhancement, not hidden-by-default: the markup below renders
+// fully resolved (solid trace, lit stages, sealed PROVEN badge) with zero
+// JS. The <script> is what temporarily "arms" it into a pending state at
+// runtime and then replays the reveal once it scrolls into view, so a
+// no-JS visitor never sees a dimmed or half-drawn state at all.
+import { Icon } from 'astro-icon/components';
+
+const TRACE_PATH =
+  'M0,110 L70,110 C130,85 160,135 220,110 L340,110 C400,138 430,82 490,110 L610,110 C665,90 700,130 750,105 L880,110 L940,110 L940,45 L1010,45 L1010,110 L1150,110 L1200,110';
+
+const stages = [
+  {
+    label: 'Hypothesize',
+    icon: 'ph:magnifying-glass',
+    detail: 'The model proposes: JWT alg confusion on /api/session.',
+  },
+  {
+    label: 'Approve',
+    icon: 'ph:hand-palm',
+    detail: 'An analyst approves this exact test. Nothing fires without it.',
+  },
+  {
+    label: 'Sandbox',
+    icon: 'ph:lock-key',
+    detail: 'Egress allow-listed to the target and the OOB listener only.',
+  },
+  {
+    label: 'Verify',
+    icon: 'ph:waveform',
+    detail: 'A deterministic, non-LLM check. The model never gets the last word.',
+  },
+  {
+    label: 'Proven',
+    icon: 'ph:seal-check',
+    detail: 'Ships with the exact request that reproduces it.',
+  },
+];
+---
+
+<div class="signal-pipeline" id="signal-pipeline">
+  <div class="relative h-24 sm:h-32">
+    <svg
+      class="pointer-events-none absolute inset-0 h-full w-full"
+      viewBox="0 0 1200 170"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path class="trace-path" d={TRACE_PATH} fill="none" stroke="var(--color-steel)" stroke-width="2" />
+    </svg>
+    <span class="pipeline-dot" aria-hidden="true"></span>
+  </div>
+
+  <ol class="stages mt-6 grid grid-cols-1 gap-5 sm:mt-8 md:grid-cols-5 md:gap-4">
+    {
+      stages.map((stage, i) => (
+        <li
+          class:list={['stage border-l-2 border-steel py-1 pl-5 md:border-l-0 md:pl-0', i === 4 && 'stage--proven']}
+          style={`transition-delay:${i * 220}ms`}
+        >
+          <div class="flex items-center gap-3 md:flex-col md:items-start">
+            <span class="stage-marker flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-steel bg-coal">
+              <Icon name={stage.icon} class="h-5 w-5 text-ash" aria-hidden="true" />
+            </span>
+            <p class="stage-label font-mono text-xs tracking-wider text-signal">
+              CH.0{i + 1} — {stage.label.toUpperCase()}
+            </p>
+          </div>
+          <p class="mt-2 max-w-[220px] text-pretty text-sm text-fog md:mt-3">{stage.detail}</p>
+        </li>
+      ))
+    }
+  </ol>
+</div>
+
+<style>
+  .trace-path {
+    transition: stroke-dashoffset 2200ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .pipeline-dot {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 9px;
+    width: 9px;
+    border-radius: 9999px;
+    background: var(--color-signal);
+    opacity: 0;
+    offset-path: path(
+      'M0,110 L70,110 C130,85 160,135 220,110 L340,110 C400,138 430,82 490,110 L610,110 C665,90 700,130 750,105 L880,110 L940,110 L940,45 L1010,45 L1010,110 L1150,110 L1200,110'
+    );
+    offset-distance: 0%;
+    transition:
+      offset-distance 2200ms cubic-bezier(0.32, 0.72, 0, 1),
+      opacity 300ms ease;
+  }
+
+  #signal-pipeline.is-active .pipeline-dot {
+    opacity: 1;
+    offset-distance: 100%;
+  }
+
+  /* Priming: added by JS only, right before the reveal — a no-JS visitor
+     never sees this dimmed state (see script below). */
+  #signal-pipeline.is-priming .stage-marker {
+    border-color: var(--color-steel);
+    filter: grayscale(1);
+    opacity: 0.4;
+  }
+  #signal-pipeline.is-priming .stage {
+    border-color: var(--color-steel);
+  }
+
+  .stage-marker {
+    transition:
+      filter 600ms cubic-bezier(0.32, 0.72, 0, 1),
+      opacity 600ms cubic-bezier(0.32, 0.72, 0, 1),
+      border-color 600ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .stage {
+    transition: border-color 600ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  #signal-pipeline.is-active .stage-marker {
+    filter: none;
+    opacity: 1;
+  }
+  #signal-pipeline.is-active .stage {
+    border-color: var(--color-signal-dim);
+  }
+
+  /* The proven seal is sealed by default — a no-JS or reduced-motion visitor
+     must see the resolved, fully-proven end state, not depend on the
+     animation to reach it. A directional, offset amber glow simulates light
+     cast downward from a fixed reading — never a centered halo (craft rule). */
+  #signal-pipeline .stage--proven,
+  .stage--proven .stage-marker {
+    border-color: var(--color-signal);
+  }
+  .stage--proven .stage-marker {
+    box-shadow: 0 10px 24px -10px rgba(255, 178, 56, 0.45);
+  }
+
+  /* JS-only transient: while priming, even the proven marker dims like the
+     rest, so the "reveal" has something to resolve into on scroll. */
+  #signal-pipeline.is-priming .stage--proven,
+  #signal-pipeline.is-priming .stage--proven .stage-marker {
+    border-color: var(--color-steel);
+    box-shadow: none;
+  }
+
+  #signal-pipeline.is-active .stage--proven .stage-marker {
+    animation: seal-stamp 640ms cubic-bezier(0.32, 0.72, 0, 1) both;
+    animation-delay: 1500ms;
+  }
+</style>
+
+<script>
+  const pipeline = document.getElementById('signal-pipeline');
+  const path = pipeline?.querySelector<SVGPathElement>('.trace-path');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (pipeline && path && !reduceMotion) {
+    const length = path.getTotalLength();
+    path.style.strokeDasharray = `${length}`;
+    path.style.strokeDashoffset = `${length}`;
+    pipeline.classList.add('is-priming');
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          pipeline.classList.remove('is-priming');
+          pipeline.classList.add('is-active');
+          requestAnimationFrame(() => {
+            path.style.strokeDashoffset = '0';
+          });
+          io.disconnect();
+        }
+      },
+      { threshold: 0.4 },
+    );
+    io.observe(pipeline);
+  }
+</script>

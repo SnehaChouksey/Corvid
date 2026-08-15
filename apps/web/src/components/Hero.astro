@@ -1,93 +1,50 @@
 ---
-// Hero (skill B5): gradient heading text, meaningful line breaks, one CTA,
-// one proof line, and a hand-built "verification" console visual (no stock
-// imagery). Heading + subheading capped at max-w for the 680px rule.
-import { Icon } from 'astro-icon/components';
+// Hero: the signature moment. Oversized display type carries the emphasis —
+// no gradient text (banned), no eyebrow label above the H1. The pipeline
+// below the fold-line is the one extraordinary animated centerpiece.
 import SectionReveal from './SectionReveal.astro';
+import SignalPipeline from './SignalPipeline.astro';
+import Graticule from './Graticule.astro';
 import { BUTTON_PRIMARY } from '../lib/styles';
 import { SIGN_UP_URL } from '../lib/config';
 ---
 
-<section id="hero" class="relative overflow-hidden px-6 pb-24 pt-24">
-  <div class="mx-auto grid max-w-6xl items-center gap-16 lg:grid-cols-[1.1fr_1fr]">
-    <div>
-      <SectionReveal>
-        <h1
-          class="hero-heading max-w-[680px] text-balance bg-linear-to-r from-chalk to-ash bg-clip-text text-5xl font-semibold leading-tight text-transparent sm:text-6xl"
-        >
-          Every finding is proven.<br />Or it isn't a finding.
-        </h1>
-      </SectionReveal>
+<section id="hero" class="relative overflow-hidden px-6 pb-20 pt-40 sm:pb-28 sm:pt-48">
+  <Graticule class="opacity-70" opacity={0.06} />
 
-      <SectionReveal delay={100}>
-        <p class="mt-8 max-w-[680px] text-pretty text-lg text-fog">
-          An autonomous security agent that hypothesizes where a vulnerability hides, tests it in an
-          egress-locked sandbox, and reports it only after a deterministic check proves the exploit fired.
+  <div class="relative mx-auto max-w-5xl">
+    <SectionReveal>
+      <h1
+        class="max-w-[820px] text-balance font-display text-5xl font-semibold leading-[1.05] text-chalk sm:text-7xl"
+      >
+        Every finding is proven.<br />Or it isn&rsquo;t a finding.
+      </h1>
+    </SectionReveal>
+
+    <SectionReveal delay={100}>
+      <p class="mt-8 max-w-[620px] text-pretty text-lg text-fog">
+        Corvid hypothesizes where a vulnerability hides, tests it inside an egress-locked sandbox, and reports
+        it only after a deterministic check proves the exploit fired.
+      </p>
+    </SectionReveal>
+
+    <SectionReveal delay={200}>
+      <div class="mt-10 flex flex-wrap items-center gap-5">
+        <a href={SIGN_UP_URL} class={BUTTON_PRIMARY}>Get started</a>
+        <p class="flex items-center gap-2 text-sm text-ash">
+          <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-signal" aria-hidden="true"></span>
+          Zero unverified findings.
         </p>
-      </SectionReveal>
-
-      <SectionReveal delay={200}>
-        <div class="mt-10">
-          <a href={SIGN_UP_URL} class={BUTTON_PRIMARY}>Get started</a>
-          <p class="mt-4 flex items-center gap-2 text-sm text-ash">
-            <Icon name="ph:shield-check" class="h-4 w-4 shrink-0 text-signal" aria-hidden="true" />
-            One rule the whole product lives by, zero unverified findings.
-          </p>
-        </div>
-      </SectionReveal>
-    </div>
-
-    <SectionReveal delay={150}>
-      <div class="rounded-2xl border border-steel bg-coal p-2 shadow-2xl shadow-ink/60">
-        <div class="flex items-center gap-2 rounded-lg bg-graphite px-4 py-3">
-          <span class="h-3 w-3 rounded-full bg-steel" aria-hidden="true"></span>
-          <span class="h-3 w-3 rounded-full bg-steel" aria-hidden="true"></span>
-          <span class="h-3 w-3 rounded-full bg-steel" aria-hidden="true"></span>
-          <span class="ml-2 font-mono text-xs text-ash">verification.log</span>
-        </div>
-        <div class="rounded-lg bg-ink p-6 font-mono text-sm leading-relaxed" role="img" aria-label="A terminal transcript showing Corvid forming a hypothesis about a JWT algorithm confusion vulnerability, testing it in a sandbox, and reporting a deterministically verified finding.">
-          <p>
-            <span class="text-ash">$</span> <span class="text-fog">hypothesize</span> jwt.alg_confusion
-            <span class="text-ash">on</span> /api/session
-          </p>
-          <p class="text-ash">→ candidate: RS256 verified as HS256, public key reused as secret</p>
-          <p class="mt-4">
-            <span class="text-ash">$</span> <span class="text-fog">test</span> --sandbox
-            egress=target,oob-listener
-          </p>
-          <p class="text-ash">→ forged token sent, awaiting authenticated response</p>
-          <p class="mt-4 flex items-center gap-2">
-            <Icon name="ph:check-circle" class="h-4 w-4 shrink-0 text-signal" aria-hidden="true" />
-            <span class="font-semibold text-chalk">verified</span>
-            <span class="text-ash">deterministic check confirmed the auth-state transition</span>
-            <span class="cursor-blink text-signal" aria-hidden="true">▍</span>
-          </p>
-        </div>
       </div>
     </SectionReveal>
   </div>
+
+  <SectionReveal delay={280}>
+    <div class="relative mx-auto mt-20 max-w-5xl rounded-2xl border border-steel bg-coal/60 p-6 sm:mt-24 sm:p-10">
+      <p class="font-mono text-xs tracking-wider text-ash">SIG.001 — LIVE TRACE</p>
+      <div class="mt-6">
+        <SignalPipeline />
+      </div>
+    </div>
+  </SectionReveal>
 </section>
-
-<style>
-  /* The gradient heading paints its text via a clipped background with a
-     transparent fill. Windows High-Contrast (forced-colors) drops the
-     background, leaving the text invisible — restore a system-color fill so
-     the H1 stays legible. Normal rendering is untouched. */
-  @media (forced-colors: active) {
-    .hero-heading {
-      background: none;
-      -webkit-text-fill-color: CanvasText;
-      color: CanvasText;
-    }
-  }
-
-  .cursor-blink {
-    animation: blink 1.1s step-end infinite;
-  }
-
-  @keyframes blink {
-    50% {
-      opacity: 0;
-    }
-  }
-</style>
