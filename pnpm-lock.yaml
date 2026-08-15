@@ -660,6 +660,40 @@ importers:
         specifier: ~5.9.3
         version: 5.9.3
 
+  packages/report:
+    dependencies:
+      '@corvid/db':
+        specifier: workspace:*
+        version: link:../db
+      '@corvid/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@corvid/logger':
+        specifier: workspace:*
+        version: link:../logger
+      '@corvid/tool-contracts':
+        specifier: workspace:*
+        version: link:../tool-contracts
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@corvid/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@corvid/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^24.9.0
+        version: 24.13.3
+      eslint:
+        specifier: ^9.39.0
+        version: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+
   packages/sandbox:
     dependencies:
       '@corvid/errors':
