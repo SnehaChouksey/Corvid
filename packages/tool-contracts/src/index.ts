@@ -6,3 +6,4 @@ export * from './fingerprint.ts';
 export * from './http-send.ts';
 export * from './testers.ts';
 export * from './oob.ts';
+export * from './report.ts';
