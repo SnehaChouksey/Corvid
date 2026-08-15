@@ -1,8 +1,9 @@
-import type { HypothesisPlan, HypothesisStatus, ScanStatus, VulnClass } from '@corvid/tool-contracts';
+import type { HypothesisPlan, HypothesisStatus, Report, ScanStatus, VulnClass } from '@corvid/tool-contracts';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -15,6 +16,14 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { users } from './auth.ts';
+
+// Postgres `bytea` for the rendered PDF (Drizzle has no first-class bytea helper). node-postgres
+// returns/accepts a Buffer for bytea, so the driver + data types are Buffer.
+const bytea = customType<{ data: Buffer; driver: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
 
 // Domain tables (`02` §5). Every row is owner-scoped: `targets`/`scans` carry `owner_id`;
 // `hypotheses`/`findings`/`audit_log` are scoped transitively through their scan. Status and
@@ -110,6 +119,26 @@ export const findings = pgTable(
     check('findings_verified_true', sql`${table.verified} = true`),
   ],
 );
+
+// The generated, verified-only report (ADR-05/26, Unit 7). One row per scan — the report writer
+// (`@corvid/report`) builds it from `findings.verified = true` only and the fan-out worker upserts
+// it here; the gateway serves it three ways (dashboard JSON view / JSON export / PDF export). The
+// `content` snapshot is verified-only by construction: it is assembled from the verified-findings
+// query, and there is no column for raw agent reasoning. The scan reaching `completed` means this
+// row exists (the worker stamps `completed` only after upserting the report), so a report is never
+// promised before it is written.
+export const reports = pgTable('reports', {
+  scanId: uuid('scan_id')
+    .primaryKey()
+    .references(() => scans.id, { onDelete: 'cascade' }),
+  // The full Report object (ADR-26 JSON form). Typed with the shared contract so a schema change
+  // is a compile error here, not a silent drift.
+  content: jsonb('content').$type<Report>().notNull(),
+  // The rendered PDF (ADR-26). Null until the worker renders it (HTML→PDF via Playwright); the JSON
+  // report is always present, so a missing PDF degrades one export, never the report itself.
+  pdf: bytea('pdf'),
+  generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 // Append-only accountability record (ADR-16). A structural UPDATE/DELETE block is added in a
 // migration; the repo layer exposes insert + read only. `scan_id` uses a plain FK (no delete
