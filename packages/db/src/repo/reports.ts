@@ -24,6 +24,8 @@ export interface ReportFindingData {
 
 export interface ScanReportData {
   readonly scanId: string;
+  /** The scan owner — the report writer attributes its LLM spend to this user (ADR-21). */
+  readonly ownerId: string;
   readonly targetUrl: string;
   readonly findings: readonly ReportFindingData[];
 }
@@ -35,7 +37,7 @@ export interface ScanReportData {
  */
 export async function getScanReportData(db: Database, scanId: string): Promise<ScanReportData | undefined> {
   const scanRows = await db
-    .select({ scanId: scans.id, targetUrl: targets.url })
+    .select({ scanId: scans.id, ownerId: scans.ownerId, targetUrl: targets.url })
     .from(scans)
     .innerJoin(targets, eq(scans.targetId, targets.id))
     .where(eq(scans.id, scanId));
@@ -55,7 +57,7 @@ export async function getScanReportData(db: Database, scanId: string): Promise<S
     .innerJoin(hypotheses, eq(findings.hypothesisId, hypotheses.id))
     .where(eq(hypotheses.scanId, scanId));
 
-  return { scanId: scan.scanId, targetUrl: scan.targetUrl, findings: rows };
+  return { scanId: scan.scanId, ownerId: scan.ownerId, targetUrl: scan.targetUrl, findings: rows };
 }
 
 /**

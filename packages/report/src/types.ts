@@ -12,8 +12,6 @@ import type { CorvidLogger } from '@corvid/logger';
 
 export interface GenerateReportInput {
   readonly scanId: string;
-  /** The scan owner — carried so per-user spend + cost recording don't re-derive it (ADR-21). */
-  readonly userId: string;
 }
 
 export interface ReportContext {

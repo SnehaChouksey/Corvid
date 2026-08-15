@@ -49,6 +49,7 @@ export async function generateReport(ctx: ReportContext, input: GenerateReportIn
     // job retries rather than persisting an empty artifact for a nonexistent scan.
     throw new Error(`generateReport: no scan data for ${input.scanId}`);
   }
+  const userId = data.ownerId; // spend + cost attribution follow the scan owner (ADR-21)
 
   const findings = data.findings.map(toReportFinding).sort(bySeverityDesc);
   const generatedAt = ctx.now().toISOString();
@@ -65,7 +66,7 @@ export async function generateReport(ctx: ReportContext, input: GenerateReportIn
   }
 
   // 4a. Spend hard-stop (fail closed for the narrative only): ship the factual report without prose.
-  const decision = evaluateDailySpend(await ctx.dailySpend(input.userId, utcDayStart(ctx.now())), ctx.ceilings);
+  const decision = evaluateDailySpend(await ctx.dailySpend(userId, utcDayStart(ctx.now())), ctx.ceilings);
   if (!decision.allowed) {
     ctx.logger?.warn(
       { scanId: input.scanId, scope: decision.trippedScope },
@@ -78,7 +79,7 @@ export async function generateReport(ctx: ReportContext, input: GenerateReportIn
   const result = await ctx.llm.complete('report', buildReportMessages(base.target, findings), reportNarrativeSchema);
   await ctx.recordCall({
     scanId: input.scanId,
-    userId: input.userId,
+    userId,
     purpose: 'report',
     model: result.model,
     costCredits: result.cost.costCredits,

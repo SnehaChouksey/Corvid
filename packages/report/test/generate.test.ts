@@ -58,8 +58,8 @@ const injectionFinding = {
 };
 
 test('a zero-finding scan produces an honest clean report with NO billed LLM call', async () => {
-  const h = ctx({ data: { scanId: 's1', targetUrl: 'https://app.example.com', findings: [] } });
-  const report = await generateReport(h.context, { scanId: 's1', userId: 'u1' });
+  const h = ctx({ data: { scanId: 's1', ownerId: 'u1', targetUrl: 'https://app.example.com', findings: [] } });
+  const report = await generateReport(h.context, { scanId: 's1' });
   assert.equal(report.clean, true);
   assert.equal(report.findings.length, 0);
   assert.match(report.summary, /No verified vulnerabilities/);
@@ -69,8 +69,8 @@ test('a zero-finding scan produces an honest clean report with NO billed LLM cal
 
 test('findings report: deterministic facts + LLM narrative/remediation applied by index', async () => {
   const idor = { ...injectionFinding, vulnClass: 'idor' as const, endpoint: 'GET /api/orders/42', severity: '6.5 CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N' };
-  const h = ctx({ data: { scanId: 's1', targetUrl: 'https://app.example.com', findings: [idor, injectionFinding] } });
-  const report = await generateReport(h.context, { scanId: 's1', userId: 'u1' });
+  const h = ctx({ data: { scanId: 's1', ownerId: 'u1', targetUrl: 'https://app.example.com', findings: [idor, injectionFinding] } });
+  const report = await generateReport(h.context, { scanId: 's1' });
   assert.equal(report.clean, false);
   // Sorted by severity: injection (9.8) before idor (6.5).
   assert.equal(report.findings[0]!.vulnClass, 'injection');
@@ -85,10 +85,10 @@ test('findings report: deterministic facts + LLM narrative/remediation applied b
 
 test('a spend stop degrades to a factual report (facts kept), never bills, never throws', async () => {
   const h = ctx({
-    data: { scanId: 's1', targetUrl: 'https://app.example.com', findings: [injectionFinding] },
+    data: { scanId: 's1', ownerId: 'u1', targetUrl: 'https://app.example.com', findings: [injectionFinding] },
     dailySpend: async () => ({ globalSpentCredits: 999, userSpentCredits: 999 }),
   });
-  const report = await generateReport(h.context, { scanId: 's1', userId: 'u1' });
+  const report = await generateReport(h.context, { scanId: 's1' });
   assert.equal(report.findings.length, 1); // verified facts still reported
   assert.equal(report.findings[0]!.remediation, null); // no narrative
   assert.match(report.summary, /verified/);
@@ -98,18 +98,18 @@ test('a spend stop degrades to a factual report (facts kept), never bills, never
 
 test('invalid LLM output still bills and still ships the factual report', async () => {
   const h = ctx({
-    data: { scanId: 's1', targetUrl: 'https://app.example.com', findings: [injectionFinding] },
+    data: { scanId: 's1', ownerId: 'u1', targetUrl: 'https://app.example.com', findings: [injectionFinding] },
     llm: createStubLlmClient(() => ({ content: 'not json at all', cost: { costCredits: 0.02, totalTokens: 50 } })),
   });
-  const report = await generateReport(h.context, { scanId: 's1', userId: 'u1' });
+  const report = await generateReport(h.context, { scanId: 's1' });
   assert.equal(report.findings.length, 1);
   assert.equal(report.findings[0]!.remediation, null);
   assert.equal(h.calls.length, 1); // a garbage response still bills (ADR-21)
 });
 
 test('the report is verified-only: it can carry no hypothesis rationale (structural)', async () => {
-  const h = ctx({ data: { scanId: 's1', targetUrl: 'https://app.example.com', findings: [injectionFinding] } });
-  const report = await generateReport(h.context, { scanId: 's1', userId: 'u1' });
+  const h = ctx({ data: { scanId: 's1', ownerId: 'u1', targetUrl: 'https://app.example.com', findings: [injectionFinding] } });
+  const report = await generateReport(h.context, { scanId: 's1' });
   // The report + its findings have no rationale key — the shape cannot express unverified reasoning.
   assert.equal('rationale' in report, false);
   for (const f of report.findings) assert.equal('rationale' in f, false);
@@ -117,8 +117,8 @@ test('the report is verified-only: it can carry no hypothesis rationale (structu
 
 test('renderReportJson round-trips; renderReportHtml escapes finding text', async () => {
   const xss = { ...injectionFinding, payload: '<script>alert(1)</script>', proof: 'a & b < c' };
-  const h = ctx({ data: { scanId: 's1', targetUrl: 'https://app.example.com', findings: [xss] } });
-  const report = await generateReport(h.context, { scanId: 's1', userId: 'u1' });
+  const h = ctx({ data: { scanId: 's1', ownerId: 'u1', targetUrl: 'https://app.example.com', findings: [xss] } });
+  const report = await generateReport(h.context, { scanId: 's1' });
 
   const json = renderReportJson(report);
   assert.deepEqual(JSON.parse(json), report);
@@ -130,8 +130,8 @@ test('renderReportJson round-trips; renderReportHtml escapes finding text', asyn
 });
 
 test('renderReportHtml renders a clean report honestly', async () => {
-  const h = ctx({ data: { scanId: 's1', targetUrl: 'https://app.example.com', findings: [] } });
-  const report = await generateReport(h.context, { scanId: 's1', userId: 'u1' });
+  const h = ctx({ data: { scanId: 's1', ownerId: 'u1', targetUrl: 'https://app.example.com', findings: [] } });
+  const report = await generateReport(h.context, { scanId: 's1' });
   const html = renderReportHtml(report);
   assert.match(html, /No verified vulnerabilities were found/);
 });
