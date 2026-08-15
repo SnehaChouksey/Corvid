@@ -25,6 +25,7 @@
   "dependencies": {
     "@corvid/errors": "workspace:*",
     "@corvid/tool-contracts": "workspace:*",
+    "bullmq": "^6.1.1",
     "ioredis": "^6.0.0"
   }
 }

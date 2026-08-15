@@ -4,6 +4,7 @@ packages:
 
 allowBuilds:
   esbuild: set this to true or false
+  msgpackr-extract: set this to true or false
 
 # esbuild's binary is delivered via its optional platform package and works without running its
 # postinstall build script, so we deliberately do NOT run it. Listing it here as an *acknowledged*
