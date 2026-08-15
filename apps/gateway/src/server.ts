@@ -12,7 +12,7 @@ import {
 import { InfraError } from '@corvid/errors';
 import { createLogger } from '@corvid/logger';
 import type { ProofPorts } from '@corvid/proof-of-control';
-import { createRedis, honoRateLimitClient } from '@corvid/redis';
+import { createRedis, createReportQueue, honoRateLimitClient, type ReportQueue } from '@corvid/redis';
 import {
   buildScanGraph,
   createCheckpointer,
@@ -77,6 +77,17 @@ const auth = createAuth({
 // wired when the listener store lands. The periodic OOB-timeout sweep (resolver already built +
 // tested) is scheduled by the dedicated scan-runtime worker, not the gateway — Unit 8.
 const { checkpointer } = await createCheckpointer(env.DATABASE_URL);
+
+// Report fan-out (ADR-17/ADR-34): when a scan enters `reporting`, enqueue a durable BullMQ job that
+// the report-worker consumes to generate + store the report and complete the scan. Requires Redis;
+// without it, the fan-out is disabled and a scan that reaches `reporting` waits for a worker (which
+// only exists once live testing is wired, Unit 0/8) — surfaced as a warning, never a silent no-op.
+let reportQueue: ReportQueue | undefined;
+if (env.REDIS_URL !== undefined) {
+  reportQueue = createReportQueue(createRedis(env.REDIS_URL));
+} else {
+  logger.warn('REDIS_URL not set — report fan-out disabled; a scan reaching "reporting" will not auto-generate a report');
+}
 const notLive = (op: string): never => {
   throw new InfraError(`scan-runtime dep '${op}' is not wired yet (live testing is Unit 0/8)`, {
     retryable: false,
@@ -102,7 +113,22 @@ const graphDeps: ScanGraphDeps = {
 };
 const scanRuntime = createScanRuntimeService({
   graph: buildScanGraph(checkpointer, graphDeps),
-  persistStatus: (scanId, status) => setScanStatus(db, scanId, status),
+  persistStatus: async (scanId, status) => {
+    await setScanStatus(db, scanId, status);
+    // Enqueue the durable report job AFTER the status is persisted (idempotent per scan), so the
+    // worker's later `completed` write never races ahead of this `reporting` write (ADR-34). An
+    // enqueue failure is logged (safe fields only), never thrown — the status is already committed.
+    if (status === 'reporting' && reportQueue !== undefined) {
+      try {
+        await reportQueue.enqueue(scanId);
+      } catch (err) {
+        logger.error(
+          { scanId, err_name: err instanceof Error ? err.name : 'unknown' },
+          'failed to enqueue report job (scan will remain in reporting until re-triggered)',
+        );
+      }
+    }
+  },
   recordApproval: (scanId, ownerId, approved) =>
     recordApprovalDecision(db, { scanId, ownerId, approvedHypotheses: approved }),
   requestCancel: (scanId, ownerId) => requestScanCancel(db, ownerId, scanId),

@@ -8,6 +8,8 @@ import {
   type Database,
   type FindingRow,
   getAuditForScanOwner,
+  getReportForScanOwner,
+  getReportPdfForScanOwner,
   getScanForOwner,
   getTargetForOwner,
   type HypothesisRow,
@@ -420,6 +422,43 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const scan = await requireOwnedScan(c);
     const rows = await getAuditForScanOwner(deps.db, c.get('userId'), scan.id);
     return c.json({ audit: rows.map(toAuditEntry) });
+  });
+
+  // The verified-only report in its three forms (ADR-26). All owner-scoped (requireOwnedScan → 404 for
+  // a non-owner). The report `content` is verified-only by construction — it was assembled from the
+  // verified-findings projection and has no path to unverified reasoning (ADR-05). `ready:false` is a
+  // normal state (the report worker hasn't generated it yet), returned as 200, not an error, so the
+  // dashboard renders "generating" without treating it as a failure.
+  api.get('/scans/:id/report', async (c) => {
+    const scan = await requireOwnedScan(c);
+    const report = await getReportForScanOwner(deps.db, c.get('userId'), scan.id);
+    return c.json({ ready: report !== undefined, report: report?.content ?? null, scanStatus: scan.status });
+  });
+
+  api.get('/scans/:id/report.json', async (c) => {
+    const scan = await requireOwnedScan(c);
+    const report = await getReportForScanOwner(deps.db, c.get('userId'), scan.id);
+    if (report === undefined) {
+      throw new HTTPException(404, { message: 'Report not ready' });
+    }
+    c.header('content-type', 'application/json; charset=utf-8');
+    c.header('content-disposition', `attachment; filename="corvid-report-${scan.id}.json"`);
+    return c.body(JSON.stringify(report.content, null, 2));
+  });
+
+  api.get('/scans/:id/report.pdf', async (c) => {
+    const scan = await requireOwnedScan(c);
+    const pdf = await getReportPdfForScanOwner(deps.db, c.get('userId'), scan.id);
+    if (pdf === undefined) {
+      // No PDF: either the report isn't generated yet, or PDF rendering degraded (a typed refusal,
+      // never a 500). The JSON form is still available at /report.json.
+      throw new HTTPException(404, { message: 'PDF not available' });
+    }
+    c.header('content-type', 'application/pdf');
+    c.header('content-disposition', `attachment; filename="corvid-report-${scan.id}.pdf"`);
+    // Extract exactly this Buffer's bytes into a standalone ArrayBuffer (a Node Buffer may be a view
+    // over a larger pooled allocation). node-postgres returns bytea as a Node Buffer.
+    return c.body(pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer);
   });
 
   // The human approval gate (Flow D, `01` §6) — the safety-critical resume. `approvedHypotheses` may

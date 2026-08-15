@@ -4,12 +4,12 @@ import { after, before, test } from 'node:test';
 
 import { createAuth, type Auth } from '@corvid/auth';
 import { createCipher } from '@corvid/crypto';
-import { createDb, type DbHandle, runMigrations, schema } from '@corvid/db';
+import { createDb, type DbHandle, runMigrations, schema, upsertReport } from '@corvid/db';
 import { createLogger } from '@corvid/logger';
 import type { ProofPorts } from '@corvid/proof-of-control';
 import { createRedis, honoRateLimitClient } from '@corvid/redis';
 import type { ScanRuntimeService } from '@corvid/scan-runtime';
-import type { ApprovalOutcome, CancelOutcome } from '@corvid/tool-contracts';
+import type { ApprovalOutcome, CancelOutcome, Report } from '@corvid/tool-contracts';
 import { eq } from 'drizzle-orm';
 import type { Hono } from 'hono';
 import { RedisStore } from 'hono-rate-limiter';
@@ -341,8 +341,70 @@ function runIntegrationTests(databaseUrl: string): void {
     const scanId = ((await started.json()) as { id: string }).id;
 
     // Owner reads succeed; the intruder gets 404 on the scan AND every sub-resource.
-    for (const path of ['', '/hypotheses', '/findings', '/audit']) {
+    for (const path of ['', '/hypotheses', '/findings', '/audit', '/report']) {
       assert.equal((await app.request(`/api/scans/${scanId}${path}`, authed(cookieA))).status, 200);
+      assert.equal((await app.request(`/api/scans/${scanId}${path}`, authed(cookieB))).status, 404);
+    }
+  });
+
+  test('report endpoints serve the stored verified-only report, owner-scoped (ADR-26)', async () => {
+    const app = makeApp(defaultLimits);
+    const cookieA = await signUp(app, `rep-owner-${Date.now()}@example.com`);
+    const cookieB = await signUp(app, `rep-intruder-${Date.now()}@example.com`);
+    const id = await createTarget(app, cookieA, 'report.example.com');
+    await handle.db
+      .update(schema.targets)
+      .set({ authorizationConfirmedAt: new Date() })
+      .where(eq(schema.targets.id, id));
+    const started = await app.request(
+      '/api/scans',
+      authed(cookieA, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetId: id }),
+      }),
+    );
+    const scanId = ((await started.json()) as { id: string }).id;
+
+    // Before generation: /report is 200 ready:false (a normal state, not an error); the downloads 404.
+    const r0 = await app.request(`/api/scans/${scanId}/report`, authed(cookieA));
+    assert.equal(r0.status, 200);
+    assert.deepEqual((await r0.json()) as { ready: boolean; report: null }, {
+      ready: false,
+      report: null,
+      scanStatus: 'authorizing',
+    });
+    assert.equal((await app.request(`/api/scans/${scanId}/report.json`, authed(cookieA))).status, 404);
+    assert.equal((await app.request(`/api/scans/${scanId}/report.pdf`, authed(cookieA))).status, 404);
+
+    // The report-worker stores the report + PDF (simulated here by a direct upsert).
+    const content: Report = {
+      scanId,
+      generatedAt: '2026-08-16T00:00:00.000Z',
+      target: { url: 'https://report.example.com' },
+      summary: 'One verified finding.',
+      clean: false,
+      findings: [],
+    };
+    await upsertReport(handle.db, { scanId, content, pdf: Buffer.from('%PDF-1.4 test-report') });
+
+    const r1 = await app.request(`/api/scans/${scanId}/report`, authed(cookieA));
+    const body1 = (await r1.json()) as { ready: boolean; report: Report };
+    assert.equal(body1.ready, true);
+    assert.equal(body1.report.summary, 'One verified finding.');
+
+    const j1 = await app.request(`/api/scans/${scanId}/report.json`, authed(cookieA));
+    assert.equal(j1.status, 200);
+    assert.match(j1.headers.get('content-disposition') ?? '', /attachment; filename="corvid-report-/);
+    assert.equal((JSON.parse(await j1.text()) as Report).scanId, scanId);
+
+    const p1 = await app.request(`/api/scans/${scanId}/report.pdf`, authed(cookieA));
+    assert.equal(p1.status, 200);
+    assert.equal(p1.headers.get('content-type'), 'application/pdf');
+    assert.match(Buffer.from(await p1.arrayBuffer()).toString('utf8'), /^%PDF-1\.4/);
+
+    // The intruder gets 404 on all three (no cross-tenant existence leak, ADR-19).
+    for (const path of ['/report', '/report.json', '/report.pdf']) {
       assert.equal((await app.request(`/api/scans/${scanId}${path}`, authed(cookieB))).status, 404);
     }
   });
