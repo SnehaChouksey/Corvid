@@ -1,7 +1,7 @@
 import type { ScanCredentials } from '@corvid/tool-contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { apiFetch } from './client';
+import { apiDownload, apiFetch } from './client';
 import {
   approvalAcceptedSchema,
   auditListSchema,
@@ -9,6 +9,7 @@ import {
   createdIdSchema,
   findingsListSchema,
   hypothesesListSchema,
+  reportResponseSchema,
   type ScanSummary,
   scanSummarySchema,
   scansListSchema,
@@ -20,6 +21,7 @@ export const scansKeys = {
   hypotheses: (id: string) => ['scans', id, 'hypotheses'] as const,
   findings: (id: string) => ['scans', id, 'findings'] as const,
   audit: (id: string) => ['scans', id, 'audit'] as const,
+  report: (id: string) => ['scans', id, 'report'] as const,
 };
 
 /** Terminal scan states never change again — stop polling once here (`02` §5.1). */
@@ -74,6 +76,30 @@ export function useAudit(scanId: string, options: { poll?: boolean } = {}) {
     enabled: scanId.length > 0,
     refetchInterval: options.poll === true ? 5_000 : false,
   });
+}
+
+/**
+ * The generated report envelope (ADR-26). Polls while the report worker is still generating it
+ * (scan `reporting`/`completed` but `ready:false`); stops once ready or once the scan is in a
+ * terminal state that produces no report (stopped/rejected/cancelled).
+ */
+export function useReport(scanId: string) {
+  return useQuery({
+    queryKey: scansKeys.report(scanId),
+    queryFn: () => apiFetch(`/api/scans/${scanId}/report`, reportResponseSchema),
+    enabled: scanId.length > 0,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data === undefined) return 3_000;
+      if (data.ready) return false;
+      return data.scanStatus === 'reporting' || data.scanStatus === 'completed' ? 3_000 : false;
+    },
+  });
+}
+
+/** Trigger a browser download of the report's JSON or PDF export (ADR-26). */
+export function downloadReport(scanId: string, format: 'json' | 'pdf'): Promise<void> {
+  return apiDownload(`/api/scans/${scanId}/report.${format}`, `corvid-report-${scanId}.${format}`);
 }
 
 export interface CreateScanInput {

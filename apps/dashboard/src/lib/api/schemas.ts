@@ -118,6 +118,47 @@ export type Finding = z.infer<typeof findingSchema>;
 
 export const findingsListSchema = z.object({ findings: z.array(findingSchema) });
 
+// The generated verified-only report (ADR-05/26). Mirrors the `Report` contract in
+// @corvid/tool-contracts; validated at the HTTP boundary like every other DTO. The severity band is
+// pre-derived server-side, so the report view never re-parses a CVSS string.
+export const severityBandSchema = z.enum(['critical', 'high', 'medium', 'low', 'none']);
+
+export const reportSeveritySchema = z.object({
+  score: z.number().nullable(),
+  vector: z.string().nullable(),
+  band: severityBandSchema,
+  raw: z.string().nullable(),
+});
+
+export const reportFindingSchema = z.object({
+  vulnClass: vulnClassSchema,
+  endpoint: z.string(),
+  payload: z.string(),
+  proof: z.string(),
+  severity: reportSeveritySchema,
+  remediation: z.string().nullable(),
+  reportedAt: z.string(),
+});
+export type ReportFinding = z.infer<typeof reportFindingSchema>;
+
+export const reportSchema = z.object({
+  scanId: z.string(),
+  generatedAt: z.string(),
+  target: z.object({ url: z.string() }),
+  summary: z.string(),
+  clean: z.boolean(),
+  findings: z.array(reportFindingSchema),
+});
+export type Report = z.infer<typeof reportSchema>;
+
+// The /report envelope: `ready:false` (with a null report) is a normal in-progress state, not an error.
+export const reportResponseSchema = z.object({
+  ready: z.boolean(),
+  report: reportSchema.nullable(),
+  scanStatus: scanStatusSchema,
+});
+export type ReportResponse = z.infer<typeof reportResponseSchema>;
+
 export const auditEntrySchema = z.object({
   id: z.string(),
   action: z.string(),

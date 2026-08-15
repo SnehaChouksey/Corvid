@@ -102,6 +102,31 @@ export async function apiFetch<T>(path: string, schema: z.ZodType<T>, init: ApiF
   return parsed.data;
 }
 
+/**
+ * Download a binary/file response from the gateway (report JSON/PDF exports, ADR-26). Uses a
+ * credentialed fetch (the session cookie is cross-origin, so a plain anchor href can't be relied on
+ * to carry it) then a transient object URL to trigger the browser's save dialog. Throws
+ * {@link ApiError} on a non-2xx so callers surface "report not ready" rather than saving an error page.
+ */
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const res = await fetch(`${apiBaseUrl()}${path}`, { credentials: 'include' });
+  if (!res.ok) {
+    throw new ApiError(res.status, await parseErrorBody(res), parseRetryAfter(res));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 /** Narrow an error-body `unknown` down to a human message, covering every documented shape. */
 export function apiErrorMessage(body: unknown, fallback: string): string {
   if (typeof body === 'object' && body !== null) {

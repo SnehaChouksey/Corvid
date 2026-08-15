@@ -7,6 +7,7 @@ import { use, useState } from 'react';
 import { ApiErrorPanel } from '@/components/api-error';
 import { FindingCard } from '@/components/scans/finding-card';
 import { HypothesisCard } from '@/components/scans/hypothesis-card';
+import { ReportView } from '@/components/scans/report-view';
 import { ScanStatusBadge } from '@/components/status-badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -156,7 +157,9 @@ export default function ScanDetailPage({ params }: { params: Promise<{ id: strin
         </TabsContent>
 
         <TabsContent value="findings" className="flex flex-col gap-3">
-          {findPending ? (
+          {terminal && scan.status === 'completed' ? (
+            <ReportView scanId={id} />
+          ) : findPending ? (
             <Skeleton className="h-24 w-full" />
           ) : findError ? (
             <ApiErrorPanel error={findErr} />
