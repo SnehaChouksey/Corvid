@@ -52,20 +52,19 @@ export async function generateReport(ctx: ReportContext, input: GenerateReportIn
   const userId = data.ownerId; // spend + cost attribution follow the scan owner (ADR-21)
 
   const findings = data.findings.map(toReportFinding).sort(bySeverityDesc);
-  const generatedAt = ctx.now().toISOString();
   const base = {
     scanId: input.scanId,
-    generatedAt,
+    generatedAt: ctx.now().toISOString(),
     target: { url: data.targetUrl },
     findings,
   };
 
-  // 3. Clean report — honest, and cost-free (no LLM call for a zero-finding scan).
+  // A zero-finding scan is a clean report — honest, and cost-free (no billed LLM call).
   if (findings.length === 0) {
     return { ...base, summary: cleanSummary(), clean: true };
   }
 
-  // 4a. Spend hard-stop (fail closed for the narrative only): ship the factual report without prose.
+  // Spend hard-stop (fail closed for the narrative only): ship the factual report without prose.
   const decision = evaluateDailySpend(await ctx.dailySpend(userId, utcDayStart(ctx.now())), ctx.ceilings);
   if (!decision.allowed) {
     ctx.logger?.warn(
@@ -75,11 +74,10 @@ export async function generateReport(ctx: ReportContext, input: GenerateReportIn
     return { ...base, summary: factualSummary(findings), clean: false };
   }
 
-  // 4b. Narrative call — record cost at the call site BEFORE acting on the result (ADR-21). A gateway
-  // outage / 402 / 429 / 5xx throws InfraError (not `ok:false`); that must NOT throw away the verified
-  // facts — degrade to the factual report, same as a spend stop. The narrative is an enrichment; the
-  // verified findings are the artifact (ADR-05/21). This is the most likely failure (OpenRouter down /
-  // out of credit), so it is handled, not propagated.
+  // Narrative call — record cost at the call site BEFORE acting on the result (ADR-21). A gateway
+  // outage / 402 / 429 / 5xx throws InfraError (not `ok:false`); that must NOT discard the verified
+  // facts — degrade to the factual report, same as a spend stop. The narrative only enriches; the
+  // verified findings are the artifact (ADR-05/21).
   let result;
   try {
     result = await ctx.llm.complete('report', buildReportMessages(base.target, findings), reportNarrativeSchema);

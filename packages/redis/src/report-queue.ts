@@ -3,11 +3,9 @@ import { Queue, Worker, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 
 // The durable finding fan-out (ADR-17, Unit 7). A scan entering `reporting` enqueues one
-// `report.generate` job; the report-worker consumes it, generates + stores the report, and completes
-// the scan. BullMQ (Redis-backed) gives the property that matters: a job survives a worker restart
-// and retries on failure — killing and restarting the worker loses no report. The finding itself is
-// already durable in Postgres before this enqueue (ADR-17 invariant), so the queue never holds the
-// only copy of anything.
+// `report.generate` job; a BullMQ job survives a worker restart and retries on failure, so killing
+// and restarting the worker loses no report. The finding is already durable in Postgres before this
+// enqueue (ADR-17 invariant) — the queue never holds the only copy of anything.
 
 export const REPORT_QUEUE = 'corvid:reports';
 
