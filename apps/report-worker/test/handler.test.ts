@@ -3,13 +3,19 @@ import { test } from 'node:test';
 
 import type { DailySpend, ScanReportData } from '@corvid/db';
 import { createStubLlmClient } from '@corvid/llm';
-import type { Report } from '@corvid/tool-contracts';
+import type { Report, ScanStatus } from '@corvid/tool-contracts';
 
 import { buildReportHandler, type ReportWorkerDeps } from '../src/handler.ts';
 
 const ZERO_SPEND: DailySpend = { globalSpentCredits: 0, userSpentCredits: 0 };
 
-function harness(opts: { data: ScanReportData; renderPdf?: (html: string) => Promise<Buffer> }): {
+function harness(opts: {
+  data: ScanReportData;
+  renderPdf?: (html: string) => Promise<Buffer>;
+  loadScanStatus?: () => Promise<ScanStatus | undefined>;
+  loadExistingReport?: () => Promise<Report | undefined>;
+  completeScan?: boolean;
+}): {
   deps: ReportWorkerDeps;
   saved: { scanId: string; content: Report; pdf?: Buffer }[];
   completed: string[];
@@ -33,6 +39,8 @@ function harness(opts: { data: ScanReportData; renderPdf?: (html: string) => Pro
       dailySpend: async () => ZERO_SPEND,
       recordCall: async () => undefined,
     },
+    loadScanStatus: opts.loadScanStatus ?? (async () => 'reporting'),
+    loadExistingReport: opts.loadExistingReport ?? (async () => undefined),
     renderPdf: opts.renderPdf ?? (async () => Buffer.from('%PDF-1.4 fake')),
     saveReport: async (input) => {
       order.push('save');
@@ -40,7 +48,9 @@ function harness(opts: { data: ScanReportData; renderPdf?: (html: string) => Pro
     },
     completeScan: async (scanId) => {
       order.push('complete');
-      completed.push(scanId);
+      const ok = opts.completeScan ?? true;
+      if (ok) completed.push(scanId);
+      return ok;
     },
     audit: async (entry) => {
       order.push('audit');
@@ -102,4 +112,22 @@ test('a clean (zero-finding) scan produces a stored clean report and completes',
   assert.equal(h.saved[0]!.content.clean, true);
   assert.equal(h.saved[0]!.content.findings.length, 0);
   assert.deepEqual(h.completed, ['s1']);
+});
+
+test('a scan no longer in reporting (e.g. cancelled) is skipped — no report generated or stored', async () => {
+  const h = harness({ data: dataWithFinding, loadScanStatus: async () => 'cancelled' });
+  await buildReportHandler(h.deps)({ scanId: 's1' });
+
+  assert.equal(h.saved.length, 0); // nothing generated or stored
+  assert.deepEqual(h.completed, []);
+  assert.equal(h.audits[0]!.action, 'report.superseded');
+});
+
+test('a scan cancelled mid-generation is not completed (guarded write returns false)', async () => {
+  const h = harness({ data: dataWithFinding, completeScan: false });
+  await buildReportHandler(h.deps)({ scanId: 's1' });
+
+  assert.equal(h.saved.length, 1); // report was stored
+  assert.deepEqual(h.completed, []); // but the scan was NOT flipped to completed
+  assert.equal(h.audits.at(-1)!.action, 'report.superseded');
 });

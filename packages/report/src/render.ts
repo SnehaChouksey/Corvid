@@ -87,7 +87,8 @@ export function renderReportHtml(report: Report): string {
   h1 { font-size: 22px; margin: 0 0 4px; }
   h2 { font-size: 15px; margin: 24px 0 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
   .sub { color: #6b7280; font-size: 11px; }
-  .summary { margin: 12px 0 0; }
+  .summary { margin: 6px 0 0; }
+  .narrative-note { margin: 4px 0 0; color: #9ca3af; font-size: 10px; font-style: italic; }
   .count { margin: 6px 0 0; font-weight: 600; }
   .clean { color: #047857; font-weight: 600; }
   .finding { border: 1px solid #e5e7eb; border-left-width: 4px; border-radius: 6px; padding: 12px 14px; margin: 12px 0; page-break-inside: avoid; }
@@ -108,6 +109,7 @@ export function renderReportHtml(report: Report): string {
   <h1>Security Report</h1>
   <div class="sub">${esc(report.target.url)} · generated ${esc(report.generatedAt)}</div>
   <h2>Executive Summary</h2>
+  <p class="narrative-note">Generated narrative. The verified findings below are the authoritative record.</p>
   <p class="summary">${esc(report.summary)}</p>
   <p class="count">${report.findings.length} verified finding${report.findings.length === 1 ? '' : 's'}</p>
   <h2>Findings</h2>

@@ -11,7 +11,10 @@ import type { LlmMessage } from '@corvid/llm';
 
 export const reportNarrativeSchema = z
   .object({
-    executiveSummary: z.string().min(1),
+    // Bounded: the summary is the most-read paragraph of a customer-facing artifact, so an over-long
+    // or rambling completion fails validation (→ `ok:false` → the deterministic factualSummary), rather
+    // than shipping unbounded LLM prose above the verified findings. The findings are authoritative.
+    executiveSummary: z.string().min(1).max(1200),
     remediations: z.array(
       z.object({ index: z.number().int().nonnegative(), guidance: z.string().min(1) }).strict(),
     ),

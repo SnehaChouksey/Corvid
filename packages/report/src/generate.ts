@@ -75,8 +75,21 @@ export async function generateReport(ctx: ReportContext, input: GenerateReportIn
     return { ...base, summary: factualSummary(findings), clean: false };
   }
 
-  // 4b. Narrative call — record cost at the call site BEFORE acting on the result (ADR-21).
-  const result = await ctx.llm.complete('report', buildReportMessages(base.target, findings), reportNarrativeSchema);
+  // 4b. Narrative call — record cost at the call site BEFORE acting on the result (ADR-21). A gateway
+  // outage / 402 / 429 / 5xx throws InfraError (not `ok:false`); that must NOT throw away the verified
+  // facts — degrade to the factual report, same as a spend stop. The narrative is an enrichment; the
+  // verified findings are the artifact (ADR-05/21). This is the most likely failure (OpenRouter down /
+  // out of credit), so it is handled, not propagated.
+  let result;
+  try {
+    result = await ctx.llm.complete('report', buildReportMessages(base.target, findings), reportNarrativeSchema);
+  } catch (err) {
+    ctx.logger?.warn(
+      { scanId: input.scanId, err_name: err instanceof Error ? err.name : 'unknown' },
+      'report narrative unavailable (LLM gateway error) — reporting facts without prose',
+    );
+    return { ...base, summary: factualSummary(findings), clean: false };
+  }
   await ctx.recordCall({
     scanId: input.scanId,
     userId,

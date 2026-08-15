@@ -393,8 +393,12 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   // owner check must happen at this boundary, not inside them.
   const requireOwnedScan = async (c: Context<AppEnv>): Promise<ScanRow> => {
     const scanId = c.req.param('id');
+    // A malformed (non-uuid) id would raise a Postgres cast error → 500, which is a weak existence
+    // oracle (500-vs-404). Reject it as 404 up front so every scan route is uniformly not-found.
     const scan =
-      scanId === undefined ? undefined : await getScanForOwner(deps.db, c.get('userId'), scanId);
+      scanId === undefined || !z.uuid().safeParse(scanId).success
+        ? undefined
+        : await getScanForOwner(deps.db, c.get('userId'), scanId);
     if (scan === undefined) {
       throw new HTTPException(404, { message: 'Not found' });
     }
@@ -441,6 +445,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (report === undefined) {
       throw new HTTPException(404, { message: 'Report not ready' });
     }
+    // Report export is the highest-value data egress in the product — audit it (ADR-16), safe fields only.
+    await appendAudit(deps.db, { scanId: scan.id, actor: c.get('userId'), action: 'report.exported', detail: 'json' });
     c.header('content-type', 'application/json; charset=utf-8');
     c.header('content-disposition', `attachment; filename="corvid-report-${scan.id}.json"`);
     return c.body(JSON.stringify(report.content, null, 2));
@@ -454,6 +460,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       // never a 500). The JSON form is still available at /report.json.
       throw new HTTPException(404, { message: 'PDF not available' });
     }
+    await appendAudit(deps.db, { scanId: scan.id, actor: c.get('userId'), action: 'report.exported', detail: 'pdf' });
     c.header('content-type', 'application/pdf');
     c.header('content-disposition', `attachment; filename="corvid-report-${scan.id}.pdf"`);
     // Extract exactly this Buffer's bytes into a standalone ArrayBuffer (a Node Buffer may be a view

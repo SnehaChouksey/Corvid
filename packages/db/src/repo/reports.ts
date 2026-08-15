@@ -1,4 +1,4 @@
-import type { Report, VulnClass } from '@corvid/tool-contracts';
+import { type Report, reportSchema, type VulnClass } from '@corvid/tool-contracts';
 import { and, eq } from 'drizzle-orm';
 
 import type { Database } from '../client.ts';
@@ -68,21 +68,32 @@ export async function upsertReport(
   db: Database,
   input: { readonly scanId: string; readonly content: Report; readonly pdf?: Buffer },
 ): Promise<void> {
+  // Validate at the storage boundary (§1): the content carries LLM-derived prose, so a drift/garbage
+  // shape fails loud here rather than being served to a customer as a malformed artifact.
+  const content = reportSchema.parse(input.content);
   await db
     .insert(reports)
     .values({
       scanId: input.scanId,
-      content: input.content,
+      content,
       ...(input.pdf !== undefined ? { pdf: input.pdf } : {}),
     })
     .onConflictDoUpdate({
       target: reports.scanId,
+      // Only overwrite the PDF when a fresh one was rendered — a retry whose PDF render failed must
+      // NOT clobber a good PDF stored by an earlier attempt.
       set: {
-        content: input.content,
-        pdf: input.pdf ?? null,
+        content,
         generatedAt: new Date(),
+        ...(input.pdf !== undefined ? { pdf: input.pdf } : {}),
       },
     });
+}
+
+/** System read of the stored report content by scan id (the worker reuses it on retry to avoid re-billing). */
+export async function getReport(db: Database, scanId: string): Promise<Report | undefined> {
+  const rows = await db.select({ content: reports.content }).from(reports).where(eq(reports.scanId, scanId));
+  return rows[0]?.content;
 }
 
 /** The report's JSON content for a scan the caller owns, or undefined (404 at the gateway). */

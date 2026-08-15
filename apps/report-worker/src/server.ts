@@ -1,15 +1,18 @@
 import {
   appendAudit,
+  completeReportedScan,
   createDb,
   DEFAULT_DAILY_SPEND_CEILINGS,
+  getReport,
   getScanReportData,
+  getScanStatus,
   recordLlmCall,
-  setScanStatus,
   sumDailyLlmSpend,
   upsertReport,
   utcDayStart,
   type SpendCeilings,
 } from '@corvid/db';
+import { reportJobSchema } from '@corvid/tool-contracts';
 import { createLogger } from '@corvid/logger';
 import { createOpenRouterClient } from '@corvid/llm';
 import { createRedis, createReportWorker } from '@corvid/redis';
@@ -51,9 +54,11 @@ async function main(): Promise<void> {
   const pdf = createPlaywrightPdfRenderer();
   const handler = buildReportHandler({
     reportCtx,
+    loadScanStatus: (scanId) => getScanStatus(db, scanId),
+    loadExistingReport: (scanId) => getReport(db, scanId),
     renderPdf: (html) => pdf.render(html),
     saveReport: (input) => upsertReport(db, input),
-    completeScan: (scanId) => setScanStatus(db, scanId, 'completed'),
+    completeScan: (scanId) => completeReportedScan(db, scanId),
     audit: (entry) => appendAudit(db, { ...entry, actor: REPORT_ACTOR }),
     logger,
   });
@@ -62,9 +67,22 @@ async function main(): Promise<void> {
   const worker = createReportWorker(connection, handler);
   worker.on('failed', (job, err) => {
     logger.error(
-      { jobId: job?.id, err_name: err instanceof Error ? err.name : 'unknown' },
+      { jobId: job?.id, err_name: err instanceof Error ? err.name : 'unknown', attemptsMade: job?.attemptsMade },
       'report job failed (will retry per backoff policy)',
     );
+    // On the final, exhausted attempt, record the failure in the append-only audit log (ADR-16) — the
+    // one place an operator looks for "why does this scan have no report". Safe fields only (§5).
+    if (job !== undefined && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+      const parsed = reportJobSchema.safeParse(job.data);
+      if (parsed.success) {
+        void appendAudit(db, {
+          scanId: parsed.data.scanId,
+          actor: REPORT_ACTOR,
+          action: 'report.failed',
+          detail: `err=${err instanceof Error ? err.name : 'unknown'}`,
+        }).catch(() => undefined);
+      }
+    }
   });
   logger.info({ queue: 'corvid:reports' }, 'report-worker listening');
 

@@ -107,7 +107,7 @@ export const reportSchema = z
 export type Report = z.infer<typeof reportSchema>;
 
 /**
- * The durable BullMQ `report.generate` job payload (ADR-17). Enqueued (jobId `report:<scanId>`,
+ * The durable BullMQ `report.generate` job payload (ADR-17). Enqueued (jobId `report-<scanId>`,
  * idempotent) when a scan enters `reporting`; the report-worker consumes it, generates + stores the
  * report, and completes the scan. Nothing sensitive rides here — the worker reads the scan by id.
  */

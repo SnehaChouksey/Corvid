@@ -65,6 +65,9 @@ export function ReportView({ scanId }: { readonly scanId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Executive summary</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Generated narrative — the verified findings below are the authoritative record.
+          </p>
         </CardHeader>
         <CardContent>
           <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90">{report.summary}</p>

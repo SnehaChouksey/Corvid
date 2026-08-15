@@ -129,6 +129,27 @@ export async function setScanStatus(db: Database, scanId: string, status: ScanSt
     .where(eq(scans.id, scanId));
 }
 
+/** The scan's current status (system read, not owner-scoped) — the report worker checks it before generating. */
+export async function getScanStatus(db: Database, scanId: string): Promise<ScanStatus | undefined> {
+  const rows = await db.select({ status: scans.status }).from(scans).where(eq(scans.id, scanId)).limit(1);
+  return rows[0]?.status;
+}
+
+/**
+ * Complete a scan ONLY if it is still `reporting` (the report worker's guarded terminal write, ADR-34).
+ * Guarded so a scan cancelled during report generation is never resurrected to `completed` — a
+ * plain `setScanStatus('completed')` would clobber the `cancelled` state. Returns true iff it
+ * transitioned; false means the scan left `reporting` (e.g. was cancelled) and must not be completed.
+ */
+export async function completeReportedScan(db: Database, scanId: string): Promise<boolean> {
+  const rows = await db
+    .update(scans)
+    .set({ status: 'completed', completedAt: new Date() })
+    .where(and(eq(scans.id, scanId), eq(scans.status, 'reporting')))
+    .returning({ id: scans.id });
+  return rows.length > 0;
+}
+
 /**
  * Cancel a scan the caller owns (Flow D/`01` §6). Advisory-locked + status-guarded so it can't race
  * an approval submit and can't cancel a terminal scan. A cancelled scan is never resumed, so its

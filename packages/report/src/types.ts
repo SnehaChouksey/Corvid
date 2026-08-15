@@ -3,12 +3,15 @@ import type { LlmClient } from '@corvid/llm';
 import type { CorvidLogger } from '@corvid/logger';
 
 // The Report Writer (ADR-05/26). It reads the VERIFIED-ONLY projection (`loadData`, whose sole
-// implementation is `getScanReportData`) and produces a Report. Two safety properties are structural
-// here: (1) the only data path is the verified-findings projection — there is no port that returns a
-// hypothesis's rationale, so the writer cannot see unverified reasoning; (2) the LLM only ANNOTATES
-// the fixed finding list (executive summary + per-finding remediation) — the findings themselves are
-// deterministic facts the model can never add to or remove from. The LLM client is INJECTED (the
-// package never constructs one), mirroring agent-core, so ADR-01's boundary is obvious in the wiring.
+// implementation is `getScanReportData`) and produces a Report. Two safety properties hold here:
+// (1) the report writer's only DATA PORT is `loadData` — the verified-findings projection, which
+// never returns a hypothesis's rationale/plan — so the writer's inputs cannot carry unverified
+// reasoning (this is a port convention, not a dependency-graph guarantee: @corvid/db is a runtime dep
+// and its barrel exposes other reads, so the isolation lives in this single injected port, reviewed);
+// (2) the LLM only ANNOTATES the fixed finding list (executive summary + per-finding remediation) —
+// the findings themselves are deterministic facts the model can never add to or remove from. The LLM
+// client is INJECTED (the package never constructs one), mirroring agent-core, so ADR-01's boundary
+// is obvious in the wiring.
 
 export interface GenerateReportInput {
   readonly scanId: string;
