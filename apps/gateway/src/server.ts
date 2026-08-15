@@ -53,10 +53,18 @@ const logger = createLogger({ level: env.LOG_LEVEL, service: 'gateway' });
 const { db } = createDb(env.DATABASE_URL);
 // Bind the credential cipher once at boot; loadKey fails closed on a bad/short key (§9).
 const credentialCipher = createCipher(loadKey(env.ENCRYPTION_KEY));
+const trustedOrigins = env.TRUSTED_ORIGINS?.split(',')
+  .map((o) => o.trim())
+  .filter((o) => o.length > 0);
 const auth = createAuth({
   database: db,
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
+  ...(trustedOrigins !== undefined && trustedOrigins.length > 0 ? { trustedOrigins } : {}),
+  // Enable Google sign-in only when both credentials are present (env enforces both-or-neither).
+  ...(env.GOOGLE_CLIENT_ID !== undefined && env.GOOGLE_CLIENT_SECRET !== undefined
+    ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } }
+    : {}),
 });
 
 // ── Durable scan runtime (ADR-27), co-located in the gateway process for v1 (ADR-33) ──────────────

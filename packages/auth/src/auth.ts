@@ -16,6 +16,11 @@ export interface AuthConfig {
   readonly baseURL: string;
   /** Additional origins (e.g. the dashboard) allowed to POST to the auth surface. */
   readonly trustedOrigins?: readonly string[];
+  /**
+   * Google OAuth credentials; when present, enables provider sign-in (ADR-19). Absent → email/password
+   * only. Redirect URI to register with Google: `${baseURL}/api/auth/callback/google`.
+   */
+  readonly google?: { readonly clientId: string; readonly clientSecret: string };
 }
 
 // Return type is inferred, not annotated: annotating it as `ReturnType<typeof betterAuth>` forces
@@ -33,6 +38,10 @@ export function createAuth(config: AuthConfig) {
     baseURL: config.baseURL,
     ...(config.trustedOrigins !== undefined ? { trustedOrigins: [...config.trustedOrigins] } : {}),
     emailAndPassword: { enabled: true },
+    // Google account links to the same `users` row, so tenant scoping is unchanged (still one users.id).
+    ...(config.google !== undefined
+      ? { socialProviders: { google: { clientId: config.google.clientId, clientSecret: config.google.clientSecret } } }
+      : {}),
     // Let Postgres generate ids via the columns' DEFAULT (uuid), rather than Better Auth's own
     // string ids — keeps every id a uuid per the `02` §5 ERD.
     advanced: { database: { generateId: false } },
