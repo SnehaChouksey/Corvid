@@ -1,0 +1,29 @@
+---
+// Final CTA (copy spec §9): identical promise, same action as the hero.
+import { Icon } from 'astro-icon/components';
+import SectionReveal from './SectionReveal.astro';
+import EmailCapture from './EmailCapture.astro';
+---
+
+<section id="get-access" class="px-6 py-24">
+  <div class="mx-auto max-w-3xl">
+    <SectionReveal>
+      <div class="rounded-2xl border border-signal/30 bg-graphite p-10 text-center sm:p-16">
+        <h2 class="mx-auto max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
+          Every finding is proven. Or it isn't a finding.
+        </h2>
+        <p class="mx-auto mt-4 max-w-[680px] text-pretty text-fog">
+          Request early access and be among the first analysts running Corvid against your authorized
+          targets.
+        </p>
+        <div class="mt-8 flex justify-center">
+          <EmailCapture id="final" />
+        </div>
+        <p class="mt-4 flex items-center justify-center gap-2 text-sm text-ash">
+          <Icon name="ph:shield-check" class="h-4 w-4 shrink-0 text-signal" aria-hidden="true" />
+          One rule the whole product lives by, zero unverified findings.
+        </p>
+      </div>
+    </SectionReveal>
+  </div>
+</section>

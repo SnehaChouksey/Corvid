@@ -1,0 +1,80 @@
+---
+// Hero (skill B5): gradient heading text, meaningful line breaks, one CTA,
+// one proof line, and a hand-built "verification" console visual (no stock
+// imagery). Heading + subheading capped at max-w for the 680px rule.
+import { Icon } from 'astro-icon/components';
+import SectionReveal from './SectionReveal.astro';
+import EmailCapture from './EmailCapture.astro';
+---
+
+<section id="hero" class="relative overflow-hidden px-6 pb-24 pt-24">
+  <div class="mx-auto grid max-w-6xl items-center gap-16 lg:grid-cols-[1.1fr_1fr]">
+    <div>
+      <SectionReveal>
+        <h1
+          class="max-w-[680px] text-balance bg-linear-to-r from-chalk to-ash bg-clip-text text-5xl font-semibold leading-tight text-transparent sm:text-6xl"
+        >
+          Every finding is proven.<br />Or it isn't a finding.
+        </h1>
+      </SectionReveal>
+
+      <SectionReveal delay={100}>
+        <p class="mt-8 max-w-[680px] text-pretty text-lg text-fog">
+          An autonomous security agent that hypothesizes where a vulnerability hides, tests it in an
+          egress-locked sandbox, and reports it only after a deterministic check proves the exploit fired.
+        </p>
+      </SectionReveal>
+
+      <SectionReveal delay={200}>
+        <div class="mt-10" id="early-access">
+          <EmailCapture id="hero" />
+          <p class="mt-4 flex items-center gap-2 text-sm text-ash">
+            <Icon name="ph:shield-check" class="h-4 w-4 shrink-0 text-signal" aria-hidden="true" />
+            One rule the whole product lives by, zero unverified findings.
+          </p>
+        </div>
+      </SectionReveal>
+    </div>
+
+    <SectionReveal delay={150}>
+      <div class="rounded-2xl border border-steel bg-coal p-2 shadow-2xl shadow-ink/60">
+        <div class="flex items-center gap-2 rounded-lg bg-graphite px-4 py-3">
+          <span class="h-3 w-3 rounded-full bg-steel" aria-hidden="true"></span>
+          <span class="h-3 w-3 rounded-full bg-steel" aria-hidden="true"></span>
+          <span class="h-3 w-3 rounded-full bg-steel" aria-hidden="true"></span>
+          <span class="ml-2 font-mono text-xs text-ash">verification.log</span>
+        </div>
+        <div class="rounded-lg bg-ink p-6 font-mono text-sm leading-relaxed" role="img" aria-label="A terminal transcript showing Corvid forming a hypothesis about a JWT algorithm confusion vulnerability, testing it in a sandbox, and reporting a deterministically verified finding.">
+          <p>
+            <span class="text-ash">$</span> <span class="text-fog">hypothesize</span> jwt.alg_confusion
+            <span class="text-ash">on</span> /api/session
+          </p>
+          <p class="text-ash">→ candidate: RS256 verified as HS256, public key reused as secret</p>
+          <p class="mt-4">
+            <span class="text-ash">$</span> <span class="text-fog">test</span> --sandbox
+            egress=target,oob-listener
+          </p>
+          <p class="text-ash">→ forged token sent, awaiting authenticated response</p>
+          <p class="mt-4 flex items-center gap-2">
+            <Icon name="ph:check-circle" class="h-4 w-4 shrink-0 text-signal" aria-hidden="true" />
+            <span class="font-semibold text-chalk">verified</span>
+            <span class="text-ash">deterministic check confirmed the auth-state transition</span>
+            <span class="cursor-blink text-signal" aria-hidden="true">▍</span>
+          </p>
+        </div>
+      </div>
+    </SectionReveal>
+  </div>
+</section>
+
+<style>
+  .cursor-blink {
+    animation: blink 1.1s step-end infinite;
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+</style>

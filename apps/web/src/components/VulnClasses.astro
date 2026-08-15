@@ -1,0 +1,56 @@
+---
+// Vulnerability classes (copy spec §7): proof beside the claim. Each row
+// pairs the vuln class with its deterministic verification signal.
+import { Icon } from 'astro-icon/components';
+import SectionReveal from './SectionReveal.astro';
+
+const classes = [
+  {
+    icon: 'ph:key',
+    name: 'JWT algorithm / key confusion',
+    signal: 'A provable authenticated state transition using a forged or mutated token.',
+  },
+  {
+    icon: 'ph:radio',
+    name: 'SSRF, including blind',
+    signal: 'A correlated callback received on the out-of-band listener for a unique per-test token.',
+  },
+  {
+    icon: 'ph:database',
+    name: 'SQL / NoSQL injection',
+    signal: 'An error-based, time-based (statistically bounded), or boolean-differential signal.',
+  },
+  {
+    icon: 'ph:identification-card',
+    name: 'IDOR',
+    signal: "One session provably reading or acting on another session's object.",
+  },
+];
+---
+
+<section id="coverage" class="px-6 py-24">
+  <div class="mx-auto max-w-6xl">
+    <SectionReveal>
+      <p class="text-sm font-semibold uppercase tracking-wide text-signal">Coverage, v1</p>
+      <h2 class="mt-4 max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
+        Four vulnerability classes, each with a real verification signal
+      </h2>
+    </SectionReveal>
+
+    <SectionReveal delay={100}>
+      <div class="mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-steel bg-steel md:grid-cols-2">
+        {
+          classes.map((item) => (
+            <div class="flex flex-col gap-3 bg-coal p-8">
+              <div class="flex items-center gap-3">
+                <Icon name={item.icon} class="h-5 w-5 shrink-0 text-signal" aria-hidden="true" />
+                <h3 class="text-lg font-semibold text-chalk">{item.name}</h3>
+              </div>
+              <p class="text-pretty text-fog">{item.signal}</p>
+            </div>
+          ))
+        }
+      </div>
+    </SectionReveal>
+  </div>
+</section>

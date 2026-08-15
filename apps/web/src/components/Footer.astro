@@ -1,0 +1,30 @@
+---
+// Footer (copy spec §10): wordmark, one-line descriptor, real links, copyright.
+import { LINK_QUIET } from '../lib/styles';
+
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-steel px-6 py-16">
+  <div class="mx-auto flex max-w-6xl flex-col items-start justify-between gap-8 sm:flex-row sm:items-center">
+    <div>
+      <a
+        href="/"
+        class="flex items-center gap-2 text-base font-semibold text-chalk transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:text-signal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal rounded-md"
+      >
+        <span aria-hidden="true" class="h-2 w-2 rounded-full border-2 border-signal"></span>
+        Corvid
+      </a>
+      <p class="mt-2 max-w-sm text-sm text-ash">
+        An autonomous appsec agent that reports a finding only after a deterministic check proves it fired.
+      </p>
+    </div>
+
+    <div class="flex items-center gap-6">
+      <a href="/privacy" class={LINK_QUIET}>Privacy policy</a>
+      <a href="/terms" class={LINK_QUIET}>Terms</a>
+    </div>
+  </div>
+
+  <p class="mx-auto mt-10 max-w-6xl text-sm text-ash">&copy; {year} Corvid. All rights reserved.</p>
+</footer>

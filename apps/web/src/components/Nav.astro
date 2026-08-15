@@ -1,0 +1,216 @@
+---
+// Island nav (skill B7): a floating glass pill detached from the top on
+// desktop; a hamburger that morphs into an X and opens a full-screen glass
+// overlay on mobile, with links staggering in.
+import { BUTTON_PRIMARY_SM, LINK_QUIET } from '../lib/styles';
+
+// Root-relative so these still resolve (not dead links) on /privacy and /terms,
+// which don't have these section ids. On the home page a same-path hash link
+// is a same-document navigation, so smooth-scroll still applies.
+const links = [
+  { href: '/#how-it-works', label: 'How it works' },
+  { href: '/#coverage', label: 'Coverage' },
+  { href: '/#faq', label: 'FAQ' },
+];
+---
+
+<header class="fixed inset-x-0 top-0 z-50">
+  <nav
+    aria-label="Primary"
+    class="mx-auto mt-6 flex w-max items-center gap-1 rounded-full border border-steel/80 bg-coal/70 px-2 py-2 shadow-lg shadow-ink/40 backdrop-blur-xl"
+  >
+    <a
+      href="/"
+      class="flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold text-chalk transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:text-signal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+    >
+      <span aria-hidden="true" class="h-2 w-2 rounded-full border-2 border-signal"></span>
+      Corvid
+    </a>
+
+    <div class="hidden items-center gap-1 md:flex">
+      {
+        links.map((link) => (
+          <a
+            href={link.href}
+            data-nav-link
+            data-section={link.href.split('#')[1]}
+            class={`${LINK_QUIET} px-3 py-2`}
+          >
+            {link.label}
+          </a>
+        ))
+      }
+    </div>
+
+    <a href="/#early-access" class={`hidden md:inline-flex ${BUTTON_PRIMARY_SM}`}>Request early access</a>
+
+    <button
+      id="nav-toggle"
+      type="button"
+      aria-expanded="false"
+      aria-controls="mobile-menu"
+      aria-label="Toggle menu"
+      class="flex h-9 w-9 items-center justify-center rounded-full transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-graphite focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal md:hidden"
+    >
+      <span class="relative block h-4 w-5" aria-hidden="true">
+        <span class="hamburger-line absolute left-0 top-0 h-0.5 w-5 rounded-full bg-chalk transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+        ></span>
+        <span class="hamburger-line absolute left-0 top-1/2 h-0.5 w-5 -translate-y-1/2 rounded-full bg-chalk transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+        ></span>
+        <span class="hamburger-line absolute bottom-0 left-0 h-0.5 w-5 rounded-full bg-chalk transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+        ></span>
+      </span>
+    </button>
+  </nav>
+</header>
+
+<div
+  id="mobile-menu"
+  class="pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-center gap-10 bg-ink/80 opacity-0 backdrop-blur-3xl transition-opacity duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] md:hidden"
+  inert
+>
+  <nav aria-label="Mobile" class="flex flex-col items-center gap-8">
+    {
+      links.map((link, i) => (
+        <a
+          href={link.href}
+          data-menu-link
+          style={`transition-delay:${100 + i * 50}ms`}
+          class="menu-link text-2xl font-semibold text-chalk transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] hover:text-signal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+        >
+          {link.label}
+        </a>
+      ))
+    }
+  </nav>
+  <a
+    href="/#early-access"
+    data-menu-link
+    style={`transition-delay:${100 + links.length * 50}ms`}
+    class={`menu-link ${BUTTON_PRIMARY_SM}`}
+  >
+    Request early access
+  </a>
+</div>
+
+<style>
+  /* Only transform/opacity change here (never top/bottom) so the morph stays
+     off the layout thread — the lines start pinned to top-0/center/bottom-0
+     and travel to the shared center purely via translateY + rotate. */
+  #nav-toggle.is-open .hamburger-line:nth-child(1) {
+    transform: translateY(7px) rotate(45deg);
+  }
+  #nav-toggle.is-open .hamburger-line:nth-child(2) {
+    opacity: 0;
+  }
+  #nav-toggle.is-open .hamburger-line:nth-child(3) {
+    transform: translateY(-7px) rotate(-45deg);
+  }
+
+  #mobile-menu.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .menu-link {
+    opacity: 0;
+    transform: translateY(3rem);
+  }
+
+  #mobile-menu.is-open .menu-link {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Active section indicator (skill B10: no dead links, show current section). */
+  a[data-nav-link][aria-current='true'] {
+    color: var(--color-chalk);
+  }
+</style>
+
+<script>
+  const toggle = document.getElementById('nav-toggle');
+  const menu = document.getElementById('mobile-menu');
+
+  // The overlay covers everything, but page content behind it (main, footer)
+  // is only visually hidden by the overlay, not removed from the tab order —
+  // make it inert too so Tab can't escape into the page behind an open menu.
+  const mainEl = document.querySelector('main');
+  const footerEl = document.querySelector('footer');
+
+  if (toggle && menu) {
+    // restoreFocus is false for in-menu link clicks: the browser is about to
+    // move focus/scroll to the link's target, so yanking focus back to the
+    // hamburger would fight that navigation. Escape and the toggle itself
+    // still return focus to the toggle button as expected.
+    const closeMenu = (restoreFocus = true) => {
+      if (toggle.getAttribute('aria-expanded') !== 'true') return;
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.classList.remove('is-open');
+      menu.classList.remove('is-open');
+      menu.setAttribute('inert', '');
+      mainEl?.removeAttribute('inert');
+      footerEl?.removeAttribute('inert');
+      document.body.classList.remove('overflow-hidden');
+      if (restoreFocus) toggle.focus();
+    };
+
+    const openMenu = () => {
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.classList.add('is-open');
+      menu.classList.add('is-open');
+      menu.removeAttribute('inert');
+      mainEl?.setAttribute('inert', '');
+      footerEl?.setAttribute('inert', '');
+      document.body.classList.add('overflow-hidden');
+      menu.querySelector<HTMLAnchorElement>('a')?.focus();
+    };
+
+    toggle.addEventListener('click', () => {
+      const isOpen = toggle.getAttribute('aria-expanded') === 'true';
+      if (isOpen) closeMenu();
+      else openMenu();
+    });
+
+    menu.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => closeMenu(false)));
+
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeMenu();
+    });
+
+    // If the viewport crosses into the desktop breakpoint while the menu is
+    // open (e.g. a tablet rotation), the overlay itself goes display:none via
+    // md:hidden, but its open state (scroll lock, aria-expanded) would
+    // otherwise linger with no visible way to dismiss it. 768px matches
+    // Tailwind's default `md` breakpoint used by md:hidden above.
+    const desktopQuery = window.matchMedia('(min-width: 768px)');
+    desktopQuery.addEventListener('change', (event) => {
+      if (event.matches) closeMenu();
+    });
+  }
+
+  // Active-section highlight for the desktop nav links, driven by
+  // IntersectionObserver (never a scroll listener, per skill B7).
+  const navLinks = document.querySelectorAll<HTMLAnchorElement>('[data-nav-link]');
+  const sections = Array.from(navLinks)
+    .map((link) => document.getElementById(link.dataset.section ?? ''))
+    .filter((el): el is HTMLElement => el !== null);
+
+  if (sections.length > 0) {
+    const sectionObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          navLinks.forEach((link) => {
+            const isCurrent = link.dataset.section === entry.target.id;
+            if (isCurrent) link.setAttribute('aria-current', 'true');
+            else link.removeAttribute('aria-current');
+          });
+        }
+      },
+      { rootMargin: '-40% 0px -55% 0px' },
+    );
+
+    sections.forEach((section) => sectionObserver.observe(section));
+  }
+</script>

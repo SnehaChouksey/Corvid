@@ -1,0 +1,96 @@
+---
+// Client-only email capture (skill B9/B10). No backend exists yet — submitting
+// validates the address, then swaps to a success state. Wiring a real endpoint
+// is a deliberate follow-up (see final report).
+import { BUTTON_PRIMARY } from '../lib/styles';
+
+interface Props {
+  /** Unique id prefix so multiple forms on one page don't collide. */
+  id: string;
+  class?: string;
+}
+
+const { id, class: className = '' } = Astro.props;
+---
+
+<div data-email-widget class:list={['w-full max-w-md', className]}>
+  <form data-email-form novalidate>
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
+      <div class="flex-1">
+        <label for={`${id}-email`} class="sr-only">Work email</label>
+        <input
+          id={`${id}-email`}
+          name="email"
+          type="email"
+          required
+          autocomplete="email"
+          placeholder="you@company.com"
+          data-email-input
+          aria-describedby={`${id}-error`}
+          aria-invalid="false"
+          class="w-full rounded-lg border border-steel bg-coal px-4 py-3 text-base text-chalk placeholder:text-ash transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:border-ash focus:outline-none focus-visible:ring-2 focus-visible:ring-signal disabled:opacity-50"
+        />
+        <p id={`${id}-error`} data-email-error class="mt-2 hidden text-sm text-chalk" role="alert"></p>
+      </div>
+      <button type="submit" class={BUTTON_PRIMARY}>Request early access</button>
+    </div>
+  </form>
+  <p data-email-success tabindex="-1" class="mt-3 hidden text-sm text-fog" role="status">
+    You are on the list. We will reach out when access opens.
+  </p>
+</div>
+
+<script>
+  function isValidEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  document.querySelectorAll<HTMLDivElement>('[data-email-widget]').forEach((widget) => {
+    const form = widget.querySelector<HTMLFormElement>('[data-email-form]');
+    const input = widget.querySelector<HTMLInputElement>('[data-email-input]');
+    const errorEl = widget.querySelector<HTMLParagraphElement>('[data-email-error]');
+    const successEl = widget.querySelector<HTMLParagraphElement>('[data-email-success]');
+    if (!form || !input || !errorEl || !successEl) return;
+
+    const clearError = () => {
+      errorEl.classList.add('hidden');
+      errorEl.textContent = '';
+      input.classList.remove('border-signal', 'ring-2', 'ring-signal/40');
+      input.setAttribute('aria-invalid', 'false');
+    };
+
+    const showError = (message: string) => {
+      // Unhide before setting text: a role="alert" region mutated while
+      // display:none is unreliably announced by screen readers.
+      errorEl.classList.remove('hidden');
+      errorEl.textContent = message;
+      input.classList.add('border-signal', 'ring-2', 'ring-signal/40');
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+    };
+
+    input.addEventListener('input', clearError);
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const value = input.value.trim();
+
+      if (!value) {
+        showError('Enter your work email to continue.');
+        return;
+      }
+      if (!isValidEmail(value)) {
+        showError('That email address does not look right.');
+        return;
+      }
+
+      clearError();
+      form.querySelectorAll('input, button').forEach((el) => {
+        (el as HTMLInputElement | HTMLButtonElement).disabled = true;
+      });
+      form.classList.add('hidden');
+      successEl.classList.remove('hidden');
+      successEl.focus();
+    });
+  });
+</script>

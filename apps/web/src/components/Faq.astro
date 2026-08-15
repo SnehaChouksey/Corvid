@@ -1,0 +1,96 @@
+---
+// FAQ (copy spec §8): plain-text Q&A for AEO, plus FAQPage JSON-LD. Uses
+// native <details>/<summary> so it needs no client script and degrades to
+// fully readable content with no JS.
+import SectionReveal from './SectionReveal.astro';
+
+const faqs = [
+  {
+    q: 'How is this different from a scanner like Burp, ZAP, or Nuclei?',
+    a: 'Scanners match patterns, a version, a header, a regex, without checking exploitability, so they flood you with false positives. Corvid only reports what it has actively tested and deterministically verified.',
+  },
+  {
+    q: 'Does an LLM decide what is vulnerable?',
+    a: 'No. An LLM hypothesizes where to look. A separate deterministic, non-LLM check decides whether the exploit actually fired. The model never gets the final word.',
+  },
+  {
+    q: "What stops it testing a target I don't own?",
+    a: 'Active testing requires recorded authorization with proof of control, enforced in the workflow and at the sandbox egress firewall, defense in depth, not a checkbox.',
+  },
+  {
+    q: 'Which vulnerability classes does it cover today?',
+    a: 'Four, done with real verification: JWT algorithm/key confusion, SSRF (including blind), SQL/NoSQL injection, and IDOR.',
+  },
+  {
+    q: 'How can it prove a blind vulnerability like blind SSRF?',
+    a: "A unique per-test token is planted, and verification waits for the target's own infrastructure to call back to our out-of-band listener. A correlated callback is the only proof. No callback means not confirmed, never confirmed.",
+  },
+  {
+    q: 'Can I point it at production?',
+    a: 'Only against targets you are authorized to test. Every active step is human approved and every request is audited.',
+  },
+  {
+    q: "What does 'verified' actually mean?",
+    a: 'A deterministic signal fired: a correlated out-of-band callback, a provable auth-state transition, or a bounded differential response. Every finding ships with a reproducible trigger.',
+  },
+  {
+    q: 'Who is it for?',
+    a: 'Security analysts and appsec engineers running authorized testing, practice labs, staging, and in-scope bug bounty targets, who want a pentester\'s reasoning without the false-positive tax.',
+  },
+  {
+    q: "What happens to my target's response data?",
+    a: 'Raw response bodies and secrets are treated as sensitive and never written to logs or the report. The report is built from verified findings only.',
+  },
+  {
+    q: 'Is there always a human in the loop?',
+    a: 'Passive crawling is autonomous. Anything that sends a live payload waits for explicit human approval at an approval gate.',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqs.map((faq) => ({
+    '@type': 'Question',
+    name: faq.q,
+    acceptedAnswer: {
+      '@type': 'Answer',
+      text: faq.a,
+    },
+  })),
+};
+---
+
+<script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} />
+
+<section id="faq" class="px-6 py-24">
+  <div class="mx-auto max-w-3xl">
+    <SectionReveal>
+      <p class="text-sm font-semibold uppercase tracking-wide text-signal">Questions analysts ask first</p>
+      <h2 class="mt-4 max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
+        Frequently asked questions
+      </h2>
+    </SectionReveal>
+
+    <SectionReveal delay={100}>
+      <div class="mt-12 divide-y divide-steel rounded-2xl border border-steel bg-coal">
+        {
+          faqs.map((faq) => (
+            <details class="group px-8 py-6 first:rounded-t-2xl last:rounded-b-2xl">
+              <summary class="flex cursor-pointer list-none items-center justify-between gap-4 text-lg font-semibold text-chalk marker:content-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal">
+                {faq.q}
+                <span
+                  aria-hidden="true"
+                  class="shrink-0 text-ash transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] group-open:rotate-45"
+                >
+                  +
+                </span>
+              </summary>
+              <p class="mt-3 text-pretty text-fog">{faq.a}</p>
+            </details>
+          ))
+        }
+      </div>
+    </SectionReveal>
+  </div>
+</section>

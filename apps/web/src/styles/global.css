@@ -1,0 +1,58 @@
+/* Self-hosted Geist (skill B1: approved typeface, no Inter/Arial). Variable fonts,
+   so one file covers every weight we use (regular through semibold — never black). */
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import 'tailwindcss';
+
+/* Dark theme is the default for the site (security tooling reads better on ink). */
+@theme {
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* Approved dark backgrounds only (skill B4). Flat, never gradients. */
+  --color-ink: #000000;
+  --color-coal: #181818;
+  --color-graphite: #1f1f1f;
+  --color-slate: #272727;
+  --color-steel: #313131;
+  --color-umber: #131209;
+
+  /* Text ramp used by the hero gradient (skill B5) and body copy. */
+  --color-chalk: #ffffff;
+  --color-ash: #9b9b9b;
+  --color-fog: #b4b4b4;
+
+  /* Single restrained accent for CTAs/focus — not in the bg palette, used on text/borders only. */
+  --color-signal: #7dd3fc;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-fog);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Respect reduced-motion: the scroll reveals and word-by-word tagline (skill B7/B11)
+   must degrade to their resolved (visible) state, never trap content at opacity 0. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

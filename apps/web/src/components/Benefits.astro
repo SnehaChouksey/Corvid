@@ -1,0 +1,60 @@
+---
+// Benefits (copy spec §4): 5 cards, bold benefit + supporting detail.
+import { Icon } from 'astro-icon/components';
+import SectionReveal from './SectionReveal.astro';
+
+const benefits = [
+  {
+    icon: 'ph:check-square-offset',
+    title: 'Nothing to triage',
+    detail:
+      'Every finding ships with the exact request that reproduces it, so your team stops learning to ignore the scanner.',
+  },
+  {
+    icon: 'ph:brain',
+    title: "A pentester's reasoning at machine scale",
+    detail: 'It reasons about your actual auth flow, not a regex on a response header.',
+  },
+  {
+    icon: 'ph:hand-palm',
+    title: 'You approve every active test',
+    detail: 'Passive crawling runs on its own. No live payload leaves until a human says go.',
+  },
+  {
+    icon: 'ph:scales',
+    title: 'Proof, not opinion',
+    detail: 'A non-LLM check gets the final word. The model proposes; it never decides a vulnerability is real.',
+  },
+  {
+    icon: 'ph:lock-key',
+    title: "It can't wander off-target",
+    detail:
+      'Egress is allow-listed to your target and the callback listener, enforced at the sandbox firewall, not in app code.',
+  },
+];
+---
+
+<section id="benefits" class="px-6 py-24">
+  <div class="mx-auto max-w-6xl">
+    <SectionReveal>
+      <p class="text-sm font-semibold uppercase tracking-wide text-signal">Why analysts keep it running</p>
+      <h2 class="mt-4 max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
+        Built to earn trust one verified finding at a time
+      </h2>
+    </SectionReveal>
+
+    <div class="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {
+        benefits.map((benefit, i) => (
+          <SectionReveal delay={(i % 3) * 80} class="h-full">
+            <article class="h-full rounded-2xl border border-steel bg-coal p-8 transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:border-signal/40">
+              <Icon name={benefit.icon} class="h-6 w-6 text-signal" aria-hidden="true" />
+              <h3 class="mt-4 text-lg font-semibold text-chalk">{benefit.title}</h3>
+              <p class="mt-3 text-pretty text-fog">{benefit.detail}</p>
+            </article>
+          </SectionReveal>
+        ))
+      }
+    </div>
+  </div>
+</section>

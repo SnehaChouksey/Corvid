@@ -1,0 +1,63 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  /** Absolute or root-relative path for canonical + og:url. Defaults to home. */
+  path?: string;
+}
+
+const { title, description, path = '/' } = Astro.props;
+const canonical = new URL(path, Astro.site).href;
+const ogImage = new URL('/og.png', Astro.site).href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href={canonical} />
+    <meta name="generator" content={Astro.generator} />
+
+    <title>{title}</title>
+    <meta name="description" content={description} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <!-- Single no-JS fallback for every SectionReveal instance: the observer
+         that adds .is-visible never runs without JS, so force the resolved,
+         visible end-state globally instead of duplicating this per instance.
+         is:inline (not is:global) so Astro leaves this tag untouched, inside
+         the noscript, instead of extracting/bundling it into the shared
+         stylesheet where it would apply unconditionally to JS users too. -->
+    <noscript>
+      <style is:inline>
+        .reveal {
+          opacity: 1 !important;
+          transform: none !important;
+          filter: none !important;
+        }
+      </style>
+    </noscript>
+  </head>
+  <body class="min-h-screen bg-ink text-fog antialiased">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-slate focus:px-4 focus:py-2 focus:text-sm focus:text-chalk focus:outline-none focus:ring-2 focus:ring-signal"
+    >
+      Skip to content
+    </a>
+    <slot />
+  </body>
+</html>

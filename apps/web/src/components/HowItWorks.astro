@@ -1,0 +1,54 @@
+---
+// How it works (copy spec §6): 3 numbered steps.
+import { Icon } from 'astro-icon/components';
+import SectionReveal from './SectionReveal.astro';
+
+const steps = [
+  {
+    icon: 'ph:magnifying-glass',
+    title: 'Authorize and crawl',
+    detail: 'Prove control of the target, then Corvid passively maps it. No payloads yet.',
+  },
+  {
+    icon: 'ph:lightbulb',
+    title: 'Hypothesize and approve',
+    detail: 'It proposes candidate vulnerabilities with rationale. You approve which ones may be tested.',
+  },
+  {
+    icon: 'ph:check-circle',
+    title: 'Test and verify',
+    detail:
+      'Approved tests fire in the sandbox. A deterministic signal confirms the exploit before it is ever called a finding.',
+  },
+];
+---
+
+<section id="how-it-works" class="px-6 py-24">
+  <div class="mx-auto max-w-6xl">
+    <SectionReveal>
+      <p class="text-sm font-semibold uppercase tracking-wide text-signal">The loop</p>
+      <h2 class="mt-4 max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
+        How it works, from authorization to a verified finding
+      </h2>
+    </SectionReveal>
+
+    <ol class="mt-12 grid gap-6 md:grid-cols-3">
+      {
+        steps.map((step, i) => (
+          <SectionReveal delay={i * 120} as="li" class="h-full">
+            <div class="h-full rounded-2xl border border-steel bg-coal p-8">
+              <div class="flex items-center gap-3">
+                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-signal/30 font-mono text-sm text-signal">
+                  {i + 1}
+                </span>
+                <Icon name={step.icon} class="h-5 w-5 text-ash" aria-hidden="true" />
+              </div>
+              <h3 class="mt-4 text-lg font-semibold text-chalk">{step.title}</h3>
+              <p class="mt-3 text-pretty text-fog">{step.detail}</p>
+            </div>
+          </SectionReveal>
+        ))
+      }
+    </ol>
+  </div>
+</section>

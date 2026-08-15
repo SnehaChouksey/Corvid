@@ -1,0 +1,25 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+---
+
+<Base
+  title="Privacy policy | Corvid"
+  description="How Corvid handles data during its pre-launch phase."
+  path="/privacy"
+>
+  <Nav />
+  <main id="main" tabindex="-1" class="mx-auto max-w-2xl px-6 pb-24 pt-24">
+    <h1 class="text-balance text-4xl font-semibold text-chalk">Privacy policy</h1>
+    <p class="mt-6 text-pretty text-lg text-fog">
+      This is a pre-launch placeholder. Corvid has not opened access to any target yet, and this page does
+      not describe a live data-handling practice.
+    </p>
+    <p class="mt-4 text-pretty text-fog">
+      A full privacy policy, covering what is collected during authorized scans, how findings and audit
+      logs are stored, and how long data is retained, will be published before general access opens.
+    </p>
+  </main>
+  <Footer />
+</Base>

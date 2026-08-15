@@ -1,0 +1,52 @@
+---
+// Problem → solution, one section (copy spec §3). Two flat cards for the
+// failure modes, one reveal for the bridging claim.
+import { Icon } from 'astro-icon/components';
+import SectionReveal from './SectionReveal.astro';
+---
+
+<section id="approach" class="px-6 py-24">
+  <div class="mx-auto max-w-6xl">
+    <SectionReveal>
+      <p class="text-sm font-semibold uppercase tracking-wide text-signal">The gap in appsec tooling</p>
+      <h2 class="mt-4 max-w-[680px] text-balance text-3xl font-semibold text-chalk sm:text-4xl">
+        Two ways to test an application today. Neither one closes the gap.
+      </h2>
+    </SectionReveal>
+
+    <div class="mt-12 grid gap-6 md:grid-cols-2">
+      <SectionReveal delay={80}>
+        <article class="h-full rounded-2xl border border-steel bg-coal p-8">
+          <Icon name="ph:funnel-simple" class="h-6 w-6 text-ash" aria-hidden="true" />
+          <h3 class="mt-4 text-xl font-semibold text-chalk">Rule-based scanners</h3>
+          <p class="mt-3 text-pretty text-fog">
+            They pattern match: a version string, a header, a regex. They cannot tell whether the thing they
+            flagged is actually exploitable, so they flood you with false positives until your team learns
+            to ignore the scanner entirely.
+          </p>
+        </article>
+      </SectionReveal>
+
+      <SectionReveal delay={160}>
+        <article class="h-full rounded-2xl border border-steel bg-coal p-8">
+          <Icon name="ph:user-focus" class="h-6 w-6 text-ash" aria-hidden="true" />
+          <h3 class="mt-4 text-xl font-semibold text-chalk">Manual pentesting</h3>
+          <p class="mt-3 text-pretty text-fog">
+            A skilled tester reasons correctly about your application, but that reasoning does not scale. One
+            engagement covers a slice of the surface, on a schedule measured in months, not requests.
+          </p>
+        </article>
+      </SectionReveal>
+    </div>
+
+    <SectionReveal delay={100}>
+      <div class="mt-12 max-w-[680px] rounded-2xl border border-signal/30 bg-graphite p-8">
+        <p class="text-pretty text-lg text-fog">
+          Corvid automates the reasoning loop of hypothesizing, testing, and verifying, while keeping
+          verification deterministic. Reasoning is agentic. Verification is deterministic engineering. The
+          model proposes; a non-LLM check decides.
+        </p>
+      </div>
+    </SectionReveal>
+  </div>
+</section>
