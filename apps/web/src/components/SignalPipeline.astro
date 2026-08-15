@@ -52,9 +52,9 @@ const stages = [
       aria-hidden="true"
       focusable="false"
     >
-      <path class="trace-path" d={TRACE_PATH} fill="none" stroke="var(--color-steel)" stroke-width="2" />
+      <path class="trace-path" d={TRACE_PATH} fill="none" stroke-width="2" />
+      <circle class="pipeline-dot" cx="0" cy="0" r="7" style={`offset-path: path('${TRACE_PATH}')`} />
     </svg>
-    <span class="pipeline-dot" aria-hidden="true"></span>
   </div>
 
   <ol class="stages mt-6 grid grid-cols-1 gap-5 sm:mt-8 md:grid-cols-5 md:gap-4">
@@ -81,22 +81,19 @@ const stages = [
 
 <style>
   .trace-path {
+    stroke: var(--color-steel);
     transition: stroke-dashoffset 2200ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 
+  /* The signal dot lives inside the SVG so it shares the trace's coordinate
+     system and scales with it under preserveAspectRatio="none". An HTML dot
+     with a pixel offset-path drifts off the right edge as the SVG stretches
+     responsively. offset-path is set inline from the same path the trace draws. */
   .pipeline-dot {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 9px;
-    width: 9px;
-    border-radius: 9999px;
-    background: var(--color-signal);
+    fill: var(--color-signal);
     opacity: 0;
-    offset-path: path(
-      'M0,110 L70,110 C130,85 160,135 220,110 L340,110 C400,138 430,82 490,110 L610,110 C665,90 700,130 750,105 L880,110 L940,110 L940,45 L1010,45 L1010,110 L1150,110 L1200,110'
-    );
     offset-distance: 0%;
+    filter: drop-shadow(0 0 5px rgba(255, 178, 56, 0.55));
     transition:
       offset-distance 2200ms cubic-bezier(0.32, 0.72, 0, 1),
       opacity 300ms ease;
