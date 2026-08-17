@@ -506,7 +506,13 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   app.onError((err, c) => {
     if (err instanceof HTTPException) {
-      return err.getResponse();
+      // Honor an explicitly-attached response, but otherwise emit the documented `{message}` JSON
+      // shape: Hono's default `getResponse()` serializes the message as a plain-text body, which
+      // breaks the gateway's JSON contract and forces the dashboard to guess at the shape.
+      if (err.res) {
+        return err.res;
+      }
+      return c.json({ message: err.message }, err.status);
     }
     if (isCorvidError(err)) {
       if (err.kind === 'authorization') {

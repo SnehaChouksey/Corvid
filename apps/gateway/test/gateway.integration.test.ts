@@ -141,7 +141,14 @@ function runIntegrationTests(databaseUrl: string): void {
     const { id } = (await created.json()) as { id: string };
 
     assert.equal((await app.request(`/api/targets/${id}`, authed(cookieA))).status, 200);
-    assert.equal((await app.request(`/api/targets/${id}`, authed(cookieB))).status, 404); // no leak
+
+    // A not-owned resource is a 404, and the body is the documented `{message}` JSON shape — not
+    // Hono's default plain-text HTTPException body — so the dashboard reads a consistent contract.
+    const notOwned = await app.request(`/api/targets/${id}`, authed(cookieB));
+    assert.equal(notOwned.status, 404); // no leak
+    assert.match(notOwned.headers.get('content-type') ?? '', /application\/json/);
+    assert.deepEqual(await notOwned.json(), { message: 'Not found' });
+
     assert.equal((await app.request(`/api/targets/${id}`)).status, 401); // unauthenticated
   });
 
