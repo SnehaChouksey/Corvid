@@ -13,7 +13,7 @@ async function main(): Promise<void> {
   const env = loadEnv();
   const logger = createLogger({ level: env.LOG_LEVEL, service: 'oob-listener' });
   const { db } = createDb(env.DATABASE_URL);
-  const store = new OobCallbackStore(createRedis(env.REDIS_URL));
+  const store = new OobCallbackStore(createRedis(env.REDIS_URL, logger));
 
   const app = createOobApp({
     store,

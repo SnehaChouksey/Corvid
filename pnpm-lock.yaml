@@ -686,6 +686,9 @@ importers:
       '@corvid/errors':
         specifier: workspace:*
         version: link:../errors
+      '@corvid/logger':
+        specifier: workspace:*
+        version: link:../logger
       '@corvid/tool-contracts':
         specifier: workspace:*
         version: link:../tool-contracts

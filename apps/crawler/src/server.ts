@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   const env = loadEnv();
   const logger = createLogger({ level: env.LOG_LEVEL, service: 'crawler', destination: process.stderr });
   const { db } = createDb(env.DATABASE_URL);
-  const redis = createRedis(env.REDIS_URL);
+  const redis = createRedis(env.REDIS_URL, logger);
   const fetcher = await PlaywrightFetcher.launch();
 
   serveStdio(() => createCrawlerServer({ fetcher, redis, db, logger }));

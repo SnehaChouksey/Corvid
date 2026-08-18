@@ -84,7 +84,7 @@ const { checkpointer } = await createCheckpointer(env.DATABASE_URL);
 // only exists once live testing is wired, Unit 0/8) — surfaced as a warning, never a silent no-op.
 let reportQueue: ReportQueue | undefined;
 if (env.REDIS_URL !== undefined) {
-  reportQueue = createReportQueue(createRedis(env.REDIS_URL));
+  reportQueue = createReportQueue(createRedis(env.REDIS_URL, logger));
 } else {
   logger.warn('REDIS_URL not set — report fan-out disabled; a scan reaching "reporting" will not auto-generate a report');
 }
@@ -142,7 +142,7 @@ const scanRuntime = createScanRuntimeService({
 // it, hono-rate-limiter's in-memory store is used — correct for a single instance only.
 let rateLimitStore: ((prefix: string) => Store<AppEnv>) | undefined;
 if (env.REDIS_URL !== undefined) {
-  const redis = createRedis(env.REDIS_URL);
+  const redis = createRedis(env.REDIS_URL, logger);
   const client = honoRateLimitClient(redis);
   rateLimitStore = (prefix) => new RedisStore<AppEnv>({ client, prefix: `corvid:rl:${prefix}:` });
 } else {

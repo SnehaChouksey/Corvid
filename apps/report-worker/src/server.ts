@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     logger,
   });
 
-  const connection = createRedis(env.REDIS_URL);
+  const connection = createRedis(env.REDIS_URL, logger);
   const worker = createReportWorker(connection, handler);
   worker.on('failed', (job, err) => {
     logger.error(
