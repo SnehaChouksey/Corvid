@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
@@ -26,6 +28,8 @@ export function createDb(connectionString: string): DbHandle {
  * resolves whether running from `src` or `dist`. Used at boot and by integration tests.
  */
 export async function runMigrations(handle: DbHandle): Promise<void> {
-  const migrationsFolder = new URL('../migrations', import.meta.url).pathname;
+  // `fileURLToPath`, not `.pathname`: on Windows `.pathname` yields a leading-slash `/D:/…` path that
+  // `path.join` inside the migrator mangles to `\D:\…`, so the journal isn't found (cross-platform).
+  const migrationsFolder = fileURLToPath(new URL('../migrations', import.meta.url));
   await migrate(handle.db, { migrationsFolder });
 }

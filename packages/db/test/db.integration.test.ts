@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { after, before, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -25,7 +26,7 @@ import { auditLog } from '../src/schema/domain.ts';
 // compose service up) to run them. `pnpm turbo run test` on a machine without a DB skips cleanly
 // rather than failing on an unrelated package.
 const DATABASE_URL = process.env.DATABASE_URL;
-const migrationsFolder = new URL('../migrations', import.meta.url).pathname;
+const migrationsFolder = fileURLToPath(new URL('../migrations', import.meta.url));
 
 if (DATABASE_URL === undefined) {
   test('db integration (skipped — set DATABASE_URL with a running Postgres to run)', { skip: true }, () => {});
