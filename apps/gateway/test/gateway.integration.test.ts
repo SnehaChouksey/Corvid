@@ -354,6 +354,97 @@ function runIntegrationTests(databaseUrl: string): void {
     }
   });
 
+  test('state-changing endpoints are 404 for a non-owner and never invoke the runtime (whole-API cross-tenant, ADR-19, Unit 8)', async () => {
+    // The read-side cross-tenant sweep above covers GETs; this covers every MUTATION path — where a
+    // leak is worst (an intruder editing/authorizing a target, or approving/cancelling a scan). Each
+    // must 404 at the ownership boundary, and the state-changing runtime calls must never be reached.
+    const rt = fakeRuntime();
+    const app = makeApp(defaultLimits, noProof, rt.service);
+    const cookieA = await signUp(app, `mut-owner-${Date.now()}@example.com`);
+    const cookieB = await signUp(app, `mut-intruder-${Date.now()}@example.com`);
+
+    const id = await createTarget(app, cookieA, 'mut-owned.example.com');
+    await handle.db
+      .update(schema.targets)
+      .set({ authorizationConfirmedAt: new Date() })
+      .where(eq(schema.targets.id, id));
+    const started = await app.request(
+      '/api/scans',
+      authed(cookieA, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetId: id }),
+      }),
+    );
+    assert.equal(started.status, 201);
+    const scanId = ((await started.json()) as { id: string }).id;
+    const startCountAfterSetup = rt.calls.start.length; // A's own start; B must not add to this
+
+    const jsonHeaders = { 'content-type': 'application/json' };
+    const originalUrl = ((await (await app.request(`/api/targets/${id}`, authed(cookieA))).json()) as { url: string })
+      .url;
+
+    // PATCH a not-owned target → 404, and the target is unchanged for its real owner.
+    assert.equal(
+      (
+        await app.request(
+          `/api/targets/${id}`,
+          authed(cookieB, {
+            method: 'PATCH',
+            headers: jsonHeaders,
+            body: JSON.stringify({ url: 'https://evil.example.com' }),
+          }),
+        )
+      ).status,
+      404,
+    );
+    assert.equal(
+      ((await (await app.request(`/api/targets/${id}`, authed(cookieA))).json()) as { url: string }).url,
+      originalUrl,
+    );
+
+    // Drive a not-owned target's proof-of-control handshake → 404 (no token minted for the intruder).
+    assert.equal(
+      (await app.request(`/api/targets/${id}/authorize`, authed(cookieB, { method: 'POST', headers: jsonHeaders, body: '{}' }))).status,
+      404,
+    );
+
+    // Start a scan on a not-owned target → 404 (target not owned); no scan is created for the intruder.
+    assert.equal(
+      (
+        await app.request(
+          '/api/scans',
+          authed(cookieB, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ targetId: id }) }),
+        )
+      ).status,
+      404,
+    );
+
+    // Approve / cancel a not-owned scan → 404, and the runtime is NEVER invoked on the intruder's
+    // behalf: the ownership gate refuses before any state-changing service call (invariant #1 defense).
+    assert.equal(
+      (
+        await app.request(
+          `/api/scans/${scanId}/approvals`,
+          authed(cookieB, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ approvedHypotheses: [] }) }),
+        )
+      ).status,
+      404,
+    );
+    assert.equal((await app.request(`/api/scans/${scanId}/cancel`, authed(cookieB, { method: 'POST' }))).status, 404);
+
+    // Assert on `.length` (not `deepEqual(…, [])`, whose `asserts actual is []` signature would
+    // narrow the array to `never[]` and poison the owner-side index access below).
+    assert.equal(rt.calls.approvals.length, 0, 'intruder must not reach submitApproval');
+    assert.equal(rt.calls.cancels.length, 0, 'intruder must not reach cancel');
+    assert.equal(rt.calls.start.length, startCountAfterSetup, 'intruder must not start a scan');
+
+    // Sanity (positive control): the real owner passes the same gate and reaches the runtime.
+    assert.equal((await app.request(`/api/scans/${scanId}/cancel`, authed(cookieA, { method: 'POST' }))).status, 200);
+    assert.equal(rt.calls.cancels.length, 1);
+    assert.equal(rt.calls.cancels[0]?.ownerId !== undefined, true);
+  });
+
   test('report endpoints serve the stored verified-only report, owner-scoped (ADR-26)', async () => {
     const app = makeApp(defaultLimits);
     const cookieA = await signUp(app, `rep-owner-${Date.now()}@example.com`);
