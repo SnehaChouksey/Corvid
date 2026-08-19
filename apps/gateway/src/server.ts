@@ -36,6 +36,7 @@ import { serve } from '@hono/node-server';
 import { RedisStore, type Store } from 'hono-rate-limiter';
 
 import { type AppEnv, createApp } from './app.ts';
+import { createCrawlPort, resolveCrawlerEntry } from './crawl-port.ts';
 import { loadEnv } from './env.ts';
 
 // Real IO for D-7 proof-of-control. The SSRF guard (dangerous host / dangerous resolved IP) lives in
@@ -137,8 +138,28 @@ if (llm !== undefined && runtimeRedis !== undefined) {
   planPort = async () => notLive('plan');
 }
 
+// ── Crawl port (Phase 2, slab 2): invoke the crawler MCP server as a subprocess (option A) ────────
+// The crawler needs a Redis frontier; without REDIS_URL (or if its entry can't be resolved) crawl
+// falls back to notLive so a started scan fails fast rather than silently mapping nothing.
+let crawlPort: ScanGraphDeps['crawl'];
+if (env.REDIS_URL !== undefined) {
+  try {
+    crawlPort = createCrawlPort({
+      entryPath: resolveCrawlerEntry(),
+      env: { DATABASE_URL: env.DATABASE_URL, REDIS_URL: env.REDIS_URL, LOG_LEVEL: env.LOG_LEVEL },
+      logger,
+    });
+  } catch (err) {
+    logger.warn({ err }, 'crawler entry not resolvable — crawl not wired; a started scan will fail fast at crawl');
+    crawlPort = async () => notLive('crawl');
+  }
+} else {
+  logger.warn('REDIS_URL not set — crawl not wired (crawler needs the frontier); a started scan will fail fast at crawl');
+  crawlPort = async () => notLive('crawl');
+}
+
 const graphDeps: ScanGraphDeps = {
-  crawl: async () => notLive('crawl'),
+  crawl: crawlPort,
   hypothesize: hypothesizePort,
   plan: planPort,
   observe: async () => notLive('observe'),
