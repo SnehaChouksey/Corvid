@@ -1,5 +1,11 @@
 import { lookup, resolveTxt } from 'node:dns/promises';
 
+import {
+  createHypothesizeContext,
+  createPlanContext,
+  hypothesize,
+  plan,
+} from '@corvid/agent-core';
 import { createAuth } from '@corvid/auth';
 import { createCipher, loadKey } from '@corvid/crypto';
 import {
@@ -10,9 +16,16 @@ import {
   setScanStatus,
 } from '@corvid/db';
 import { InfraError } from '@corvid/errors';
+import { createOpenRouterClient } from '@corvid/llm';
 import { createLogger } from '@corvid/logger';
 import type { ProofPorts } from '@corvid/proof-of-control';
-import { createRedis, createReportQueue, honoRateLimitClient, type ReportQueue } from '@corvid/redis';
+import {
+  createRedis,
+  createReportQueue,
+  honoRateLimitClient,
+  HypothesisDedup,
+  type ReportQueue,
+} from '@corvid/redis';
 import {
   buildScanGraph,
   createCheckpointer,
@@ -93,10 +106,41 @@ const notLive = (op: string): never => {
     retryable: false,
   });
 };
+
+// ── Reasoning ports (Phase 2, slab 1): wire hypothesize + plan when the LLM + Redis are present ────
+// The reasoning core needs OpenRouter (ADR-23) and a Redis for the per-scan hypothesis dedup cache
+// (the DB unique index is the durable authority; the cache is only the fast path). Without either,
+// these ports fall back to notLive so a started scan fails fast and audibly, never half-running.
+const runtimeRedis = env.REDIS_URL !== undefined ? createRedis(env.REDIS_URL, logger) : undefined;
+const llm =
+  env.OPENROUTER_API_KEY !== undefined
+    ? createOpenRouterClient({ apiKey: env.OPENROUTER_API_KEY }, { logger })
+    : undefined;
+
+let hypothesizePort: ScanGraphDeps['hypothesize'];
+let planPort: ScanGraphDeps['plan'];
+if (llm !== undefined && runtimeRedis !== undefined) {
+  const hypothesizeCtx = createHypothesizeContext({
+    db,
+    llm,
+    dedupFor: (scanId) => new HypothesisDedup(runtimeRedis, scanId),
+    logger,
+  });
+  const planCtx = createPlanContext({ db, logger });
+  hypothesizePort = (input) => hypothesize(hypothesizeCtx, input);
+  planPort = (scanId) => plan(planCtx, scanId);
+} else {
+  logger.warn(
+    'reasoning not wired (needs OPENROUTER_API_KEY + REDIS_URL) — a started scan will fail fast at hypothesize',
+  );
+  hypothesizePort = async () => notLive('hypothesize');
+  planPort = async () => notLive('plan');
+}
+
 const graphDeps: ScanGraphDeps = {
   crawl: async () => notLive('crawl'),
-  hypothesize: async () => notLive('hypothesize'),
-  plan: async () => notLive('plan'),
+  hypothesize: hypothesizePort,
+  plan: planPort,
   observe: async () => notLive('observe'),
   persistFinding: async (f) => {
     await insertFinding(db, {

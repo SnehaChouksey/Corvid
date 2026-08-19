@@ -22,6 +22,10 @@ const EnvSchema = z
     // or store plaintext — both worse than not booting. The exact 32-byte AES-256 decode is enforced
     // by @corvid/crypto's loadKey. Generate with `openssl rand -base64 32`.
     ENCRYPTION_KEY: z.string().min(1),
+    // OpenRouter API key for the reasoning core (ADR-23). Optional so the gateway still boots without
+    // it (in a degraded mode where a started scan fails fast at the hypothesize node); when set, the
+    // durable runtime's hypothesize/plan ports are wired live. Model slugs live in @corvid/llm.
+    OPENROUTER_API_KEY: z.string().min(1).optional(),
     PORT: z.coerce.number().int().positive().default(8787),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),

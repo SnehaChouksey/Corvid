@@ -163,6 +163,9 @@ importers:
 
   apps/gateway:
     dependencies:
+      '@corvid/agent-core':
+        specifier: workspace:*
+        version: link:../../packages/agent-core
       '@corvid/auth':
         specifier: workspace:*
         version: link:../../packages/auth
@@ -175,6 +178,9 @@ importers:
       '@corvid/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@corvid/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@corvid/logger':
         specifier: workspace:*
         version: link:../../packages/logger

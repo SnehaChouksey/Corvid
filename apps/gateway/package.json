@@ -11,9 +11,11 @@
     "start": "node --env-file-if-exists=../../.env dist/server.js"
   },
   "dependencies": {
+    "@corvid/agent-core": "workspace:*",
     "@corvid/auth": "workspace:*",
     "@corvid/config": "workspace:*",
     "@corvid/db": "workspace:*",
+    "@corvid/llm": "workspace:*",
     "@corvid/errors": "workspace:*",
     "@corvid/logger": "workspace:*",
     "@corvid/proof-of-control": "workspace:*",
