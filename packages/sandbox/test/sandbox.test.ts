@@ -18,7 +18,7 @@ test('refuses to create a sandbox without recorded authorization — and never c
   const factory: SandboxFactory = {
     create: async (options) => {
       calls.push(options);
-      return { sandboxId: 'x', kill: async () => {} };
+      return { sandboxId: 'x', writeFile: async () => {}, run: async () => ({ exitCode: 0, stdout: '', stderr: '' }), kill: async () => {} };
     },
   };
 
@@ -35,7 +35,12 @@ test('with authorization, egress denies all and allows only scope hosts + OOB (l
   const factory: SandboxFactory = {
     create: async (options) => {
       calls.push(options);
-      return { sandboxId: 'sbx_1', kill: async () => void (killed = true) };
+      return {
+        sandboxId: 'sbx_1',
+        writeFile: async () => {},
+        run: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+        kill: async () => void (killed = true),
+      };
     },
   };
 

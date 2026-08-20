@@ -32,8 +32,34 @@ export interface SandboxCreateOptions {
   readonly timeoutMs: number;
 }
 
+/** The captured result of a command run inside the sandbox (never throws on a non-zero exit). */
+export interface SandboxExecResult {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  /** Set when the command could not run/complete normally (distinct from a clean non-zero exit). */
+  readonly error?: string;
+}
+
+export interface SandboxRunOptions {
+  readonly envs?: Record<string, string>;
+  readonly timeoutMs?: number;
+}
+
 export interface RunningSandbox {
   readonly sandboxId: string;
+  /**
+   * Write a UTF-8 file into the sandbox filesystem — used to ship the burst runner bundle and its
+   * input (target/scope/plans/credentials) in, so no attack input travels on a command line.
+   */
+  writeFile(path: string, content: string): Promise<void>;
+  /**
+   * Run a command inside the sandbox and wait for it, capturing exit code + output. A non-zero exit
+   * is returned (not thrown), so the caller decides what a crashed burst means (§4). The command's
+   * network egress is subject to the sandbox firewall — this is the ONLY correct place to send a
+   * payload from (ADR-08/22), never the host.
+   */
+  run(cmd: string, options?: SandboxRunOptions): Promise<SandboxExecResult>;
   kill(): Promise<void>;
 }
 
@@ -79,5 +105,11 @@ export async function createTestingSandbox(
     timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 
-  return { sandboxId: running.sandboxId, allowOut, kill: running.kill.bind(running) };
+  return {
+    sandboxId: running.sandboxId,
+    allowOut,
+    writeFile: running.writeFile.bind(running),
+    run: running.run.bind(running),
+    kill: running.kill.bind(running),
+  };
 }
