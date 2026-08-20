@@ -13,6 +13,7 @@
   "dependencies": {
     "@corvid/agent-core": "workspace:*",
     "@corvid/auth": "workspace:*",
+    "@corvid/burst-runner": "workspace:*",
     "@corvid/config": "workspace:*",
     "@corvid/crawler": "workspace:*",
     "@corvid/db": "workspace:*",
@@ -21,6 +22,7 @@
     "@corvid/logger": "workspace:*",
     "@corvid/proof-of-control": "workspace:*",
     "@corvid/redis": "workspace:*",
+    "@corvid/sandbox": "workspace:*",
     "@corvid/scan-runtime": "workspace:*",
     "@corvid/scope": "workspace:*",
     "@corvid/tool-contracts": "workspace:*",

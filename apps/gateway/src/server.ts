@@ -1,4 +1,5 @@
 import { lookup, resolveTxt } from 'node:dns/promises';
+import { readFileSync } from 'node:fs';
 
 import {
   createHypothesizeContext,
@@ -18,6 +19,7 @@ import {
 import { InfraError } from '@corvid/errors';
 import { createOpenRouterClient } from '@corvid/llm';
 import { createLogger } from '@corvid/logger';
+import { createE2bSandboxFactory } from '@corvid/sandbox';
 import type { ProofPorts } from '@corvid/proof-of-control';
 import {
   createRedis,
@@ -32,12 +34,14 @@ import {
   createScanRuntimeService,
   type ScanGraphDeps,
 } from '@corvid/scan-runtime';
+import { scanCredentialsSchema } from '@corvid/tool-contracts';
 import { serve } from '@hono/node-server';
 import { RedisStore, type Store } from 'hono-rate-limiter';
 
 import { type AppEnv, createApp } from './app.ts';
 import { createCrawlPort, resolveCrawlerEntry } from './crawl-port.ts';
 import { loadEnv } from './env.ts';
+import { createObservePort, resolveBurstBundlePath } from './observe-port.ts';
 
 // Real IO for D-7 proof-of-control. The SSRF guard (dangerous host / dangerous resolved IP) lives in
 // @corvid/proof-of-control; these ports just do the IO. The fetch REFUSES redirects (`redirect:
@@ -158,11 +162,36 @@ if (env.REDIS_URL !== undefined) {
   crawlPort = async () => notLive('crawl');
 }
 
+// ── Observe port (Phase 2, slab 3c): run the testing burst inside a per-burst E2B sandbox ─────────
+// Needs the E2B key (the sandbox) — without it, observe fails fast so a scan never "tests" without the
+// egress-restricted sandbox that is the whole safety model (ADR-22). OOB is all-or-nothing: with all
+// three OOB vars, blind-SSRF confirmation is enabled; without them, SSRF hypotheses are skipped.
+let observePort: ScanGraphDeps['observe'];
+if (env.E2B_API_KEY !== undefined) {
+  const oob =
+    env.OOB_HOST !== undefined && env.OOB_REGISTER_URL !== undefined && env.OOB_CONTROL_TOKEN !== undefined
+      ? { host: env.OOB_HOST, registerUrl: env.OOB_REGISTER_URL, controlToken: env.OOB_CONTROL_TOKEN }
+      : undefined;
+  observePort = createObservePort({
+    db,
+    sandboxFactory: createE2bSandboxFactory(env.E2B_API_KEY),
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is a trusted package resolve (@corvid/burst-runner/bundle), never user input
+    bundle: readFileSync(resolveBurstBundlePath(), 'utf8'),
+    // Decrypt + validate transiently; the plaintext never leaves this closure or reaches a log (§5).
+    decrypt: (ciphertext) => scanCredentialsSchema.parse(JSON.parse(credentialCipher.decrypt(ciphertext))),
+    ...(oob !== undefined ? { oob } : {}),
+    logger,
+  });
+} else {
+  logger.warn('E2B_API_KEY not set — observe not wired; a started scan will fail fast at the testing burst');
+  observePort = async () => notLive('observe');
+}
+
 const graphDeps: ScanGraphDeps = {
   crawl: crawlPort,
   hypothesize: hypothesizePort,
   plan: planPort,
-  observe: async () => notLive('observe'),
+  observe: observePort,
   persistFinding: async (f) => {
     await insertFinding(db, {
       hypothesisId: f.hypothesisId,

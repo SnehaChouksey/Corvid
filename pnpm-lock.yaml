@@ -169,6 +169,9 @@ importers:
       '@corvid/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@corvid/burst-runner':
+        specifier: workspace:*
+        version: link:../../packages/burst-runner
       '@corvid/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -193,6 +196,9 @@ importers:
       '@corvid/redis':
         specifier: workspace:*
         version: link:../../packages/redis
+      '@corvid/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
       '@corvid/scan-runtime':
         specifier: workspace:*
         version: link:../../packages/scan-runtime

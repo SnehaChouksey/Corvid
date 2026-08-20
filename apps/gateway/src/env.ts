@@ -26,6 +26,16 @@ const EnvSchema = z
     // it (in a degraded mode where a started scan fails fast at the hypothesize node); when set, the
     // durable runtime's hypothesize/plan ports are wired live. Model slugs live in @corvid/llm.
     OPENROUTER_API_KEY: z.string().min(1).optional(),
+    // E2B API key for the per-burst egress-restricted testing sandbox (ADR-22). Optional so the
+    // gateway boots without it (a started scan then fails fast at the `observe` node); when set, the
+    // testing burst runs inside a real E2B sandbox.
+    E2B_API_KEY: z.string().min(1).optional(),
+    // OOB listener coordinates for blind-SSRF confirmation (ADR-09/D-16). All-or-nothing: the host is
+    // added to the sandbox egress allow-list, and the control plane URL + bearer token let the burst
+    // register callback tokens. Absent → SSRF hypotheses are skipped (jwt/injection/idor unaffected).
+    OOB_HOST: z.string().min(1).optional(),
+    OOB_REGISTER_URL: z.url().optional(),
+    OOB_CONTROL_TOKEN: z.string().min(1).optional(),
     PORT: z.coerce.number().int().positive().default(8787),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),

@@ -50,6 +50,23 @@ export async function getTargetForScan(
   return rows[0]?.target;
 }
 
+/**
+ * The scan's encrypted analyst credentials ciphertext (D-1), by scan id — a trusted system read for
+ * the testing burst (like `getTargetForScan`): the orchestrator hands a scan id, the caller decrypts
+ * transiently and never logs the plaintext (§5). `null` = no credentials; `undefined` = no such scan.
+ */
+export async function getScanCredentialsEncrypted(
+  db: Database,
+  scanId: string,
+): Promise<string | null | undefined> {
+  const rows = await db
+    .select({ credentialsEncrypted: scans.credentialsEncrypted })
+    .from(scans)
+    .where(eq(scans.id, scanId))
+    .limit(1);
+  return rows[0]?.credentialsEncrypted;
+}
+
 export async function listScansForOwner(db: Database, ownerId: string): Promise<ScanRow[]> {
   return db.select().from(scans).where(eq(scans.ownerId, ownerId)).orderBy(desc(scans.createdAt));
 }
