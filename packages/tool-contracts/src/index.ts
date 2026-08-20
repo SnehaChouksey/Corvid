@@ -7,3 +7,4 @@ export * from './http-send.ts';
 export * from './testers.ts';
 export * from './oob.ts';
 export * from './report.ts';
+export * from './burst.ts';

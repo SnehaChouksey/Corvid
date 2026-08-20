@@ -1,20 +1,13 @@
 {
-  "name": "@corvid/http-send",
+  "name": "@corvid/burst-runner",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./core": {
-      "types": "./dist/core.d.ts",
-      "default": "./dist/core.js"
-    }
+    "./bundle": "./dist/bundle.cjs"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "test": "node --test"
@@ -23,15 +16,14 @@
     "@corvid/eslint-config": "workspace:*",
     "@corvid/typescript-config": "workspace:*",
     "@types/node": "^24.9.0",
+    "esbuild": "^0.25.0",
     "eslint": "^9.39.0",
     "typescript": "~5.9.3"
   },
   "dependencies": {
-    "@corvid/db": "workspace:*",
-    "@corvid/errors": "workspace:*",
-    "@corvid/logger": "workspace:*",
-    "@corvid/redis": "workspace:*",
+    "@corvid/http-send": "workspace:*",
     "@corvid/scope": "workspace:*",
+    "@corvid/testers": "workspace:*",
     "@corvid/tool-contracts": "workspace:*"
   }
 }
