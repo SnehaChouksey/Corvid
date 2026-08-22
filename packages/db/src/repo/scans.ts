@@ -2,7 +2,7 @@ import type { CancelOutcome, ScanStatus } from '@corvid/tool-contracts';
 import { and, desc, eq, sql } from 'drizzle-orm';
 
 import type { Database } from '../client.ts';
-import { scans, targets } from '../schema/domain.ts';
+import { auditLog, scans, targets } from '../schema/domain.ts';
 import type { TargetRow } from './targets.ts';
 
 export type ScanRow = typeof scans.$inferSelect;
@@ -124,7 +124,19 @@ export async function createScanWithinCap(
           : {}),
       })
       .returning();
-    return inserted[0] ?? null;
+    const scan = inserted[0] ?? null;
+    // Audit the scan creation at the point it happens, with the human as actor (ADR-16). This is the
+    // action that kicks off the whole active-testing lifecycle — a skipped audit here is a defect.
+    // Safe fields only: the scan/target ids, never credentials (§5).
+    if (scan !== null) {
+      await tx.insert(auditLog).values({
+        scanId: scan.id,
+        action: 'scan.created',
+        actor: params.ownerId,
+        detail: `target=${params.targetId}`,
+      });
+    }
+    return scan;
   });
 }
 
@@ -189,6 +201,14 @@ export async function requestScanCancel(
     if (scan === undefined) return 'not_found';
     if (!ACTIVE_STATES.includes(scan.status)) return 'not_cancellable';
     await tx.update(scans).set({ status: 'cancelled', completedAt: new Date() }).where(eq(scans.id, scanId));
+    // Audit the human cancel at the point it happens (ADR-16). Cancelling abandons the paused durable
+    // interrupt so no payload ever fires — a safety-relevant action, recorded with the human as actor.
+    await tx.insert(auditLog).values({
+      scanId,
+      action: 'scan.cancelled',
+      actor: ownerId,
+      detail: `from=${scan.status}`,
+    });
     return 'cancelled';
   });
 }

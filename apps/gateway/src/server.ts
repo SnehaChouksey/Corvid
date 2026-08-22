@@ -88,12 +88,14 @@ const auth = createAuth({
 // ── Durable scan runtime (ADR-27), co-located in the gateway process for v1 (ADR-33) ──────────────
 // The service is the seam the gateway signals the workflow through. The DB ports (status sync,
 // approval decision, cancel) are LIVE — the human approval gate records its decision durably here.
-// The graph's REASONING and TESTER deps (crawl/hypothesize/plan/observe) are NOT yet wired: live
-// testing needs the crawler process, OpenRouter, E2B + the tester tools (external prerequisites,
-// Unit 0/8). They throw a typed InfraError until then, so a started scan fails fast and audibly
-// rather than pretending to run. persistFinding is real (verified-only store); OOB confirmation is
-// wired when the listener store lands. The periodic OOB-timeout sweep (resolver already built +
-// tested) is scheduled by the dedicated scan-runtime worker, not the gateway — Unit 8.
+// The graph's REASONING and TESTER deps (crawl/hypothesize/plan/observe) are wired LIVE below
+// (Unit 8 Phase 2), each GATED on its external prerequisite being present in env: crawl needs the
+// crawler subprocess + Redis frontier, hypothesize/plan need OpenRouter + Redis, observe needs the
+// E2B sandbox (+ optional OOB for blind SSRF). When a prerequisite is missing, that port falls back
+// to `notLive` — a started scan fails fast and audibly at that node rather than pretending to run.
+// persistFinding is real (verified-only store); OOB callback confirmation is wired when the listener
+// store lands (until then a blind SSRF safely times out to not_confirmed). The periodic OOB-timeout
+// sweep (resolver built + tested) is scheduled by the dedicated scan-runtime worker, not the gateway.
 const { checkpointer } = await createCheckpointer(env.DATABASE_URL);
 
 // Report fan-out (ADR-17/ADR-34): when a scan enters `reporting`, enqueue a durable BullMQ job that

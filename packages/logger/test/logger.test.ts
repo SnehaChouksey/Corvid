@@ -99,6 +99,38 @@ test('a CorvidError serializes to safe structured fields with its context scrubb
   assert.ok(typeof serialized['stack'] === 'string');
 });
 
+test('a forced error carrying secrets in its context has them scrubbed on the error path (§5, Unit 8)', () => {
+  const sink = capturing();
+  const log = createLogger({ level: 'error', service: 'http-send', destination: sink });
+  // The realistic forced-failure shape: a tool-server error whose context carries request details —
+  // an Authorization header, the analyst's session cookie, and the raw target response body. All must
+  // be redacted in the serialized `err.context`, while non-secret identifiers survive for debugging.
+  const err = new InfraError('target returned 500 during a send', {
+    retryable: true,
+    context: {
+      scan_id: 's1',
+      endpoint: '/api/orders/1',
+      authorization: 'Bearer super-secret-jwt',
+      cookie: 'session=analyst-session-token',
+      response_body: '<html>SENSITIVE TARGET DATA</html>',
+    },
+  });
+  log.error({ err }, 'send failed');
+
+  const rec = lastRecord(sink.lines);
+  const ctx = (rec['err'] as Record<string, unknown>)['context'] as Record<string, unknown>;
+  assert.equal(ctx['authorization'], '[REDACTED]');
+  assert.equal(ctx['cookie'], '[REDACTED]');
+  assert.equal(ctx['response_body'], '[REDACTED]');
+  assert.equal(ctx['scan_id'], 's1'); // non-secret id survives
+  assert.equal(ctx['endpoint'], '/api/orders/1');
+  // Defense in depth: the whole serialized line must not contain any secret substring, anywhere.
+  const line = sink.lines.at(-1) ?? '';
+  for (const secret of ['super-secret-jwt', 'analyst-session-token', 'SENSITIVE TARGET DATA']) {
+    assert.ok(!line.includes(secret), `secret leaked into the log line: ${secret}`);
+  }
+});
+
 test('withFields binds standard fields onto a child logger (§13)', () => {
   const sink = capturing();
   const log = createLogger({ level: 'info', service: 'x', destination: sink });

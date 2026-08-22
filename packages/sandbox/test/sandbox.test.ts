@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { AuthorizationError } from '@corvid/errors';
 import { parseScopeRules } from '@corvid/scope';
 
+import { createE2bSandboxFactory } from '../src/e2b.ts';
 import {
   createTestingSandbox,
   type SandboxCreateOptions,
@@ -64,9 +65,64 @@ test('with authorization, egress denies all and allows only scope hosts + OOB (l
   assert.equal(killed, true);
 });
 
-// The live firewall proof (DoD: a deliberate out-of-scope egress is denied, asserted on an
-// application-level signal not a socket open) requires a real E2B_API_KEY (Unit 0). Documented as
-// pending-external rather than silently missing.
-test('live E2B egress denial (pending E2B_API_KEY — Unit 0)', { skip: process.env.E2B_API_KEY === undefined }, () => {
-  // Intentionally empty until a key exists; see AGENTS.md invariant on accept-then-drop.
+// The live firewall proof (Unit 8 safety-audit DoD: a deliberate out-of-scope egress is DENIED,
+// asserted on an APPLICATION-LEVEL signal — an HTTP response that never arrives — not a socket open,
+// because E2B can accept-then-drop a denied egress, §7/AGENTS.md). Opt-in via a real E2B_API_KEY.
+//
+// The probe runs INSIDE the egress-restricted sandbox and attempts two fetches: one to the single
+// in-scope host (must complete with a status) and one to an out-of-scope host (must fail to return
+// any HTTP response within a bounded timeout). We assert on those app-level outcomes, never on a
+// connect() result.
+const E2B_API_KEY = process.env.E2B_API_KEY;
+test('live E2B egress: in-scope reachable, out-of-scope denied (app-level signal)', { skip: E2B_API_KEY === undefined }, async () => {
+  const apiKey = E2B_API_KEY!;
+  // Scope allows ONLY example.com (+ the OOB host); example.org is deliberately out of scope.
+  const escopeScope = parseScopeRules({ hosts: ['example.com'] });
+  const sandbox = await createTestingSandbox(createE2bSandboxFactory(apiKey), {
+    scope: escopeScope,
+    oob: { host: 'oob.invalid' },
+    authorization: { confirmedAt: new Date() },
+    timeoutMs: 90_000,
+  });
+
+  try {
+    assert.deepEqual([...sandbox.allowOut].sort(), ['example.com', 'oob.invalid']); // deny-all + these
+
+    // A CommonJS probe (Node 20 in the sandbox; `fetch` is global). A denied egress may hang, so each
+    // fetch is bounded — a timeout/abort proves "no HTTP response", the correct app-level signal.
+    const probe = [
+      'const BEGIN = "__EGRESS_BEGIN__", END = "__EGRESS_END__";',
+      'async function probe(url) {',
+      '  try {',
+      '    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });',
+      '    return { responded: true, status: res.status };',
+      '  } catch (e) {',
+      '    return { responded: false, error: String((e && e.name) || e) };',
+      '  }',
+      '}',
+      '(async () => {',
+      '  const inScope = await probe("https://example.com/");',
+      '  const outOfScope = await probe("https://example.org/");',
+      '  console.log(BEGIN + JSON.stringify({ inScope, outOfScope }) + END);',
+      '})();',
+    ].join('\n');
+    await sandbox.writeFile('/home/user/egress-probe.cjs', probe);
+    const result = await sandbox.run('node /home/user/egress-probe.cjs');
+
+    const start = result.stdout.indexOf('__EGRESS_BEGIN__');
+    const end = result.stdout.indexOf('__EGRESS_END__');
+    assert.ok(start !== -1 && end > start, `probe produced no parseable output: ${result.stdout} ${result.stderr}`);
+    const parsed = JSON.parse(result.stdout.slice(start + '__EGRESS_BEGIN__'.length, end)) as {
+      inScope: { responded: boolean; status?: number };
+      outOfScope: { responded: boolean; error?: string };
+    };
+
+    // In-scope: the request completed and returned an HTTP status (application-level reachability).
+    assert.equal(parsed.inScope.responded, true, 'the in-scope host must be reachable through the allow-list');
+    assert.equal(typeof parsed.inScope.status, 'number');
+    // Out-of-scope: NO HTTP response ever arrived — the egress was denied at the firewall.
+    assert.equal(parsed.outOfScope.responded, false, 'an out-of-scope egress must NOT return an HTTP response');
+  } finally {
+    await sandbox.kill();
+  }
 });
