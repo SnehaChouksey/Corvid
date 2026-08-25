@@ -46,6 +46,24 @@ export interface ObservePortDeps {
   readonly sandboxTimeoutMs?: number;
 }
 
+/**
+ * The `endpoint` column is stored as "METHOD url" (a display convention, e.g. "POST https://…/api").
+ * The burst runner's http.send needs the BARE url — passing the whole string makes `new URL()` throw,
+ * which reads as out-of-scope and silently refuses every payload. Strip the leading method token, but
+ * only when the tail is a valid absolute URL, so a bare-url endpoint still works.
+ */
+function endpointUrl(endpoint: string): string {
+  const spaceIdx = endpoint.indexOf(' ');
+  if (spaceIdx === -1) return endpoint;
+  const tail = endpoint.slice(spaceIdx + 1).trim();
+  try {
+    new URL(tail);
+    return tail;
+  } catch {
+    return endpoint;
+  }
+}
+
 /** Flatten a persisted hypothesis + its plan into a burst hypothesis; null when it has no plan. */
 function toBurstHypothesis(row: HypothesisRow): BurstHypothesis | null {
   const plan = row.plan;
@@ -53,7 +71,7 @@ function toBurstHypothesis(row: HypothesisRow): BurstHypothesis | null {
   return {
     hypothesisId: row.id,
     vulnClass: row.vulnClass,
-    url: row.endpoint,
+    url: endpointUrl(row.endpoint),
     method: plan.method,
     ...(plan.param !== undefined ? { param: plan.param } : {}),
     payloadFamily: plan.payloadFamily,
