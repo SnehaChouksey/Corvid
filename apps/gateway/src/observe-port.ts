@@ -33,6 +33,9 @@ import {
 const BURST_OUTPUT_BEGIN = '__CORVID_BURST_BEGIN__';
 const BURST_OUTPUT_END = '__CORVID_BURST_END__';
 
+/** How long the in-sandbox burst may run (dozens of rate-limited requests across the testers). */
+const BURST_RUN_TIMEOUT_MS = 4 * 60 * 1000;
+
 export interface ObservePortDeps {
   readonly db: Database;
   readonly sandboxFactory: SandboxFactory;
@@ -133,17 +136,22 @@ export function createObservePort(deps: ObservePortDeps): ScanGraphDeps['observe
 
     // Layer 1 (authz assert) + layer 2 (egress allow-list) are both derived from the SAME scope here
     // (ADR-03/08); createTestingSandbox refuses before touching E2B if authorization isn't recorded.
+    // The burst can send dozens of rate-limited requests (injection alone fuzzes ~7 payloads/param),
+    // so the in-sandbox run needs minutes, not the E2B ~60s command default. Give the RUN a generous
+    // budget and the sandbox LIFETIME a bit more so the command bound is what fires, not the teardown.
     const sandbox = await createTestingSandbox(deps.sandboxFactory, {
       scope,
       oob: { host: deps.oob?.host ?? 'oob.invalid' },
       authorization: { confirmedAt: target.authorizationConfirmedAt },
-      ...(deps.sandboxTimeoutMs !== undefined ? { timeoutMs: deps.sandboxTimeoutMs } : {}),
+      timeoutMs: deps.sandboxTimeoutMs ?? BURST_RUN_TIMEOUT_MS + 60_000,
     });
 
     try {
       await sandbox.writeFile('/home/user/bundle.cjs', deps.bundle);
       await sandbox.writeFile('/home/user/burst-input.json', JSON.stringify(burstInput));
-      const result = await sandbox.run('node /home/user/bundle.cjs /home/user/burst-input.json');
+      const result = await sandbox.run('node /home/user/bundle.cjs /home/user/burst-input.json', {
+        timeoutMs: BURST_RUN_TIMEOUT_MS,
+      });
       const output = extractOutput(result.stdout);
       if (output === null) {
         // A burst that produced no parseable output is a tooling failure, never a clean negative (§4).

@@ -29,6 +29,8 @@ export interface ObservedRequest {
   readonly url: string;
   readonly method: string;
   readonly resourceType: string;
+  /** The request body (Playwright `postData`) for a mutating request — used to derive body params. */
+  readonly body?: string;
 }
 
 export interface ObservedForm {
@@ -135,6 +137,7 @@ function upsertEndpoint(
   rawUrl: string,
   method: HttpMethod,
   source: EndpointSource,
+  body?: string,
 ): MutableEndpoint | null {
   let url: URL;
   try {
@@ -151,7 +154,40 @@ function upsertEndpoint(
   for (const name of url.searchParams.keys()) {
     if (!ep.params.has(name)) ep.params.set(name, 'query');
   }
+  addBodyParams(ep, body);
   return ep;
+}
+
+/**
+ * Derive `body` params from a mutating request's payload — the attack surface most SPAs/JSON APIs
+ * actually expose (a `fetch('/api/search',{method:'POST',body:JSON.stringify({q})})` names no query
+ * param, so without this the endpoint is mapped with zero params and injection can't be hypothesized).
+ * Parses a JSON object body (top-level keys) or an x-www-form-urlencoded body. Param NAMES only — the
+ * values are target data and are never retained (§5).
+ */
+function addBodyParams(ep: MutableEndpoint, body: string | undefined): void {
+  if (body === undefined || body.length === 0) return;
+  const trimmed = body.trimStart();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed: unknown = JSON.parse(body);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const name of Object.keys(parsed)) {
+          if (name.length > 0 && !ep.params.has(name)) ep.params.set(name, 'body');
+        }
+      }
+      return;
+    } catch {
+      // Fall through: not valid JSON despite the leading brace.
+    }
+  }
+  // x-www-form-urlencoded fallback (a=1&b=2); ignore anything that doesn't parse into named keys.
+  if (trimmed.includes('=')) {
+    for (const pair of trimmed.split('&')) {
+      const name = pair.split('=', 1)[0]?.trim();
+      if (name !== undefined && name.length > 0 && !ep.params.has(name)) ep.params.set(name, 'body');
+    }
+  }
 }
 
 function finalizeEndpoint(ep: MutableEndpoint): CrawledEndpoint {
@@ -322,7 +358,7 @@ export async function crawl(
         // Re-check scope even for "sent" requests: the engine never trusts the fetcher's
         // classification for a safety decision (defense in depth — H3).
         if (source !== null && isAllowed(req.url) && endpoints.size < MAX_ENDPOINTS) {
-          upsertEndpoint(endpoints, req.url, toHttpMethod(req.method), source);
+          upsertEndpoint(endpoints, req.url, toHttpMethod(req.method), source, req.body);
         }
       }
       for (const req of page.blockedRequests) {

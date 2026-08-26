@@ -67,10 +67,14 @@ export class PlaywrightFetcher implements PageFetcher {
       await context.route('**/*', async (route) => {
         try {
           const request = route.request();
+          // Capture the POST/PUT/PATCH body so the engine can derive body params (JSON/form) — the
+          // real attack surface of a fetch/XHR API. postData() is null for bodyless requests.
+          const postData = request.postData() ?? undefined;
           const observed: ObservedRequest = {
             url: request.url(),
             method: request.method(),
             resourceType: request.resourceType(),
+            ...(postData !== undefined ? { body: postData } : {}),
           };
           if (isAllowed(observed.url)) {
             sentRequests.push(observed);

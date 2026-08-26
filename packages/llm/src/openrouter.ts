@@ -12,7 +12,10 @@ import type { LlmClient, LlmCost, LlmMessage, LlmPurpose, LlmResult } from './ty
 
 /** purpose -> model slug. The default string appears in exactly this one place in the repo (ADR-23). */
 export const DEFAULT_MODELS: Readonly<Record<LlmPurpose, string>> = {
-  hypothesize: 'google/gemini-2.5-flash-lite',
+  // hypothesize drives detection recall — flash-lite proved inconsistent at spotting obvious
+  // injection/jwt/idor across runs (Unit 8 calibration), so it uses the stronger flash. report is
+  // annotation-only over a fixed finding list, so the cheaper lite is fine there.
+  hypothesize: 'google/gemini-2.5-flash',
   report: 'google/gemini-2.5-flash-lite',
 };
 
