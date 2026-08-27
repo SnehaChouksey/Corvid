@@ -21,6 +21,7 @@ function observation(over: Partial<IdorObservation> = {}): IdorObservation {
     highPrivilege: sig(200, VICTIM), // B reading B's basket → same
     controlSelf: sig(200, OWN), // A reading A's own basket → succeeds, different data
     controlAbsent: sig(404, 'hash-404'), // A reading a non-existent id → denied
+    controlUnauth: sig(401, 'hash-unauth'), // no session → refused (endpoint is access-controlled)
     ...over,
   };
 }
@@ -40,6 +41,14 @@ test('verified: A reads the victim’s object (== owner, ≠ own) with controls 
 
 test('not_confirmed: missing controls', () => {
   assert.equal(verifyIdor(observation({ controlSelf: undefined, controlAbsent: undefined })).kind, 'not_confirmed');
+  assert.equal(verifyIdor(observation({ controlUnauth: undefined })).kind, 'not_confirmed'); // no access-control proof
+});
+
+test('not_confirmed: PUBLIC endpoint — an unauthenticated request returns the same object (not IDOR)', () => {
+  // The no-auth control gets the victim's data too, so the object isn't access-controlled at all —
+  // reporting IDOR here would be a false positive. This is the guard the unauth control exists for.
+  const result = verifyIdor(observation({ controlUnauth: sig(200, VICTIM) }));
+  assert.equal(result.kind, 'not_confirmed');
 });
 
 test('not_confirmed: endpoint returns the CALLER’S OWN object regardless of id (A==own, ≠ owner)', () => {

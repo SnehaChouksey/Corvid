@@ -21,10 +21,12 @@ function isSuccess(signal: ResponseSignal): boolean {
 }
 
 export function verifyIdor(observation: IdorObservation): VerifyResult {
-  const { lowPrivilege, highPrivilege, controlSelf, controlAbsent, endpoint } = observation;
+  const { lowPrivilege, highPrivilege, controlSelf, controlAbsent, controlUnauth, endpoint } = observation;
 
-  if (controlSelf === undefined || controlAbsent === undefined) {
-    return notConfirmed('missing D-15 controls (A-on-own, A-on-absent) — cannot rule out broken-auth / universal access');
+  if (controlSelf === undefined || controlAbsent === undefined || controlUnauth === undefined) {
+    return notConfirmed(
+      'missing D-15 controls (A-on-own, A-on-absent, no-auth) — cannot rule out broken-auth / universal / public access',
+    );
   }
 
   const gotVictimData =
@@ -34,25 +36,29 @@ export function verifyIdor(observation: IdorObservation): VerifyResult {
   // empty/null content. This rules out a universal endpoint that returns the same data for any id.
   // (Content check, not status: some apps answer a bogus id with 200 + an empty/null body.)
   const absentControlHolds = !sameResponse(controlAbsent, lowPrivilege);
+  // Access-control: the no-auth request must NOT return the victim's object. If it does, the endpoint
+  // is simply public — not an authorization flaw — and reporting it would be a false positive.
+  const accessControlled = !sameResponse(controlUnauth, lowPrivilege);
 
-  if (gotVictimData && selfControlHolds && absentControlHolds) {
+  if (gotVictimData && selfControlHolds && absentControlHolds && accessControlled) {
     return {
       kind: 'verified',
       severity: DEFAULT_SEVERITY.idor,
       proof: {
-        summary: `IDOR confirmed on ${endpoint}: the low-privilege session read the victim's object (byte-identical to the owner's response, and distinct from its own) while a non-existent id did not return that data.`,
+        summary: `IDOR confirmed on ${endpoint}: the low-privilege session read the victim's object (byte-identical to the owner's response, and distinct from its own) while a non-existent id did not return that data and the endpoint rejects an unauthenticated request.`,
         signals: {
           endpoint,
           lowStatus: lowPrivilege.status,
           matchesOwner: true,
           distinctFromOwnResource: true,
           absentDistinct: true,
+          accessControlled: true,
         },
       },
     };
   }
 
   return notConfirmed(
-    "cross-session ownership proof did not hold (need: A reads B's data, distinct from A's own; A's self control succeeds; A's absent control fails)",
+    "cross-session ownership proof did not hold (need: A reads B's data, distinct from A's own; A's self control succeeds; A's absent control fails; no-auth is refused)",
   );
 }

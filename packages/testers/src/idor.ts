@@ -25,6 +25,9 @@ export interface IdorCompareInput {
   readonly ownResourceUrl?: string;
   /** D-15 absent control: a non-existent id under the low-priv session (should fail). */
   readonly absentResourceUrl?: string;
+  /** D-15 access-control control: re-issue the target request with NO auth headers. If it still
+   * returns the object, the endpoint is public (not IDOR) and the verifier must refuse. */
+  readonly unauthControl?: boolean;
 }
 
 export type IdorOutcome = { readonly kind: 'observed'; readonly observation: IdorObservation } | NotSent;
@@ -57,6 +60,15 @@ export async function idorCompare(send: SendFn, input: IdorCompareInput): Promis
     controlAbsent = c.signal;
   }
 
+  // Access-control control: the target request with NO auth headers. A public endpoint returns the
+  // object here too, which the verifier uses to rule out a false "IDOR" on unprotected data.
+  let controlUnauth: IdorObservation['controlUnauth'];
+  if (input.unauthControl === true) {
+    const c = signalFrom(await send({ ...base, url: target.url, headers: {} }));
+    if (!c.ok) return { kind: 'not_sent', reason: c.notSent };
+    controlUnauth = c.signal;
+  }
+
   return {
     kind: 'observed',
     observation: {
@@ -67,6 +79,7 @@ export async function idorCompare(send: SendFn, input: IdorCompareInput): Promis
       highPrivilege: high.signal,
       ...(controlSelf !== undefined ? { controlSelf } : {}),
       ...(controlAbsent !== undefined ? { controlAbsent } : {}),
+      ...(controlUnauth !== undefined ? { controlUnauth } : {}),
     },
   };
 }

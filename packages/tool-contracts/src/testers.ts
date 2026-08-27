@@ -109,6 +109,10 @@ export const idorObservationSchema = z
     // (older observations parse), but the verifier requires them to confirm.
     controlSelf: responseSignalSchema.optional(),
     controlAbsent: responseSignalSchema.optional(),
+    // Access-control control: the SAME request with NO session (no auth headers). If it returns the
+    // victim's object, the endpoint is simply public — not an IDOR — so the verifier refuses. Required
+    // to confirm, so a public endpoint can never be reported as broken access control (zero-FP).
+    controlUnauth: responseSignalSchema.optional(),
   })
   .strict();
 export type IdorObservation = z.infer<typeof idorObservationSchema>;

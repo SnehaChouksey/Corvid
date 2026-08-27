@@ -56,6 +56,30 @@ function httpOobRegister(oob: NonNullable<BurstInput['oob']>): OobRegistrar['reg
   };
 }
 
+/**
+ * Rewrite the last purely-numeric path segment of a URL (the enumerable object id an IDOR rides on),
+ * e.g. `/api/orders/7` → `/api/orders/6`. Returns null when there is no numeric segment (a non-id
+ * URL), so the caller omits the derived control and the verifier safely declines to confirm.
+ */
+function withLastNumericSegment(rawUrl: string, replace: (n: number) => number): string | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  const segments = url.pathname.split('/');
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const seg = segments[i];
+    if (seg !== undefined && /^\d+$/.test(seg)) {
+      segments[i] = String(replace(Number(seg)));
+      url.pathname = segments.join('/');
+      return url.toString();
+    }
+  }
+  return null;
+}
+
 /** Dispatch one approved hypothesis to its tester, returning the observation (or null when unsent). */
 async function runOne(
   send: SendFn,
@@ -81,10 +105,19 @@ async function runOne(
     case 'idor': {
       // Needs two labeled sessions at different privilege (D-15). secondary = lower privilege.
       if (creds?.idorSessions === undefined) return null;
+      // D-15 controls, derived from the target's numeric object id (the enumerable reference the IDOR
+      // rides on): a DIFFERENT valid id for the self control, and a clearly non-existent id for the
+      // absent control. The unauth control (target with no session) is always sent. When the id is not
+      // a plain number these stay undefined and the verifier declines to confirm (fail safe, no FP).
+      const ownResourceUrl = withLastNumericSegment(h.url, (n) => (n > 1 ? n - 1 : n + 1));
+      const absentResourceUrl = withLastNumericSegment(h.url, () => 2147483647);
       const outcome = await idorCompare(send, {
         target,
         lowPrivilege: { headers: creds.idorSessions.secondary.headers },
         highPrivilege: { headers: creds.idorSessions.primary.headers },
+        unauthControl: true,
+        ...(ownResourceUrl !== null ? { ownResourceUrl } : {}),
+        ...(absentResourceUrl !== null ? { absentResourceUrl } : {}),
       });
       return outcome.kind === 'observed' ? outcome.observation : null;
     }
