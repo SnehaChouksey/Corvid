@@ -148,13 +148,18 @@ const TERMINAL_STATES: readonly ScanStatus[] = ['completed', 'rejected', 'cancel
  * System status sync (NOT owner-scoped): the scan-runtime service writes the durable graph's
  * lifecycle state to `scans.status` at each invoke/resume boundary so the dashboard reflects the
  * workflow truthfully (CODING_STANDARDS §10). Keyed by the scan id the service is already driving —
- * this is a trusted internal write, never a user-facing mutation. Stamps `completed_at` on a
- * terminal state.
+ * this is a trusted internal write, never a user-facing mutation. Stamps `started_at` on the FIRST
+ * status write (coalesce preserves it on every later write) so scan wall-clock = completed − started
+ * is measurable (Unit 8 duration measurement), and `completed_at` on a terminal state.
  */
 export async function setScanStatus(db: Database, scanId: string, status: ScanStatus): Promise<void> {
   await db
     .update(scans)
-    .set({ status, ...(TERMINAL_STATES.includes(status) ? { completedAt: new Date() } : {}) })
+    .set({
+      status,
+      startedAt: sql`coalesce(${scans.startedAt}, now())`,
+      ...(TERMINAL_STATES.includes(status) ? { completedAt: new Date() } : {}),
+    })
     .where(eq(scans.id, scanId));
 }
 
