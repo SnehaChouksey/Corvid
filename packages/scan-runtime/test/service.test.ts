@@ -31,9 +31,23 @@ function graphDeps(overrides: Partial<ScanGraphDeps> = {}): ScanGraphDeps {
 interface Harness {
   readonly service: ReturnType<typeof createScanRuntimeService>;
   readonly statuses: ScanStatus[];
+  readonly oobWaits: string[];
   flush(): Promise<void>;
   recordApprovalArgs: { scanId: string; ownerId: string; approved: readonly string[] } | undefined;
 }
+
+// A blind-SSRF observation: the graph routes it to the durable `awaitOob` wait (never a synchronous
+// verdict), so a scan that sees one pauses — the case the OOB sweep exists to resolve.
+const ssrfObserved = {
+  hypothesisId: 'h1',
+  observation: {
+    vulnClass: 'ssrf' as const,
+    param: { name: 'url', location: 'query' as const },
+    oobToken: 'a'.repeat(32),
+    sent: true,
+    sentAt: 1,
+  },
+};
 
 function harness(opts: {
   approval?: ApprovalOutcome;
@@ -41,9 +55,11 @@ function harness(opts: {
   graph?: Partial<ScanGraphDeps>;
 }): Harness {
   const statuses: ScanStatus[] = [];
+  const oobWaits: string[] = [];
   const tasks: Promise<void>[] = [];
   const h: Harness = {
     statuses,
+    oobWaits,
     recordApprovalArgs: undefined,
     async flush() {
       await Promise.all(tasks);
@@ -60,6 +76,9 @@ function harness(opts: {
       requestCancel: async () => opts.cancel ?? 'cancelled',
       background: (task) => {
         tasks.push(task());
+      },
+      onOobWait: async (scanId) => {
+        oobWaits.push(scanId);
       },
     }),
   };
@@ -122,4 +141,47 @@ test('submitApproval surfaces invalid_hypotheses without resuming', async () => 
 test('cancel delegates to the injected port', async () => {
   const h = harness({ cancel: 'not_cancellable' });
   assert.equal(await h.service.cancel('scan-5', 'user-1'), 'not_cancellable');
+});
+
+test('a blind-SSRF observation pauses at awaitOob, registers via onOobWait, and does not yet report', async () => {
+  const h = harness({
+    approval: { kind: 'accepted', approved: ['h1'], rejected: [] },
+    graph: { observe: async () => [ssrfObserved] },
+  });
+  h.service.start('scan-oob', 'user-1');
+  await h.flush();
+
+  await h.service.submitApproval('scan-oob', 'user-1', { approvedHypotheses: ['h1'] });
+  await h.flush();
+
+  // Paused at the durable OOB wait: registered for the sweep, and NOT yet at reporting (the wait is
+  // still open — only the sweep's timeout resume finalizes it).
+  assert.deepEqual(h.oobWaits, ['scan-oob']);
+  assert.equal(h.statuses.includes('reporting'), false);
+});
+
+test('resumeOobWait resolves a paused OOB wait to reporting, and is a no-op otherwise (idempotent)', async () => {
+  const h = harness({
+    approval: { kind: 'accepted', approved: ['h1'], rejected: [] },
+    graph: { observe: async () => [ssrfObserved] },
+  });
+  h.service.start('scan-oob2', 'user-1');
+  await h.flush();
+  await h.service.submitApproval('scan-oob2', 'user-1', { approvedHypotheses: ['h1'] });
+  await h.flush();
+  assert.equal(h.statuses.includes('reporting'), false);
+
+  // The sweep's timeout resume drives the graph through the OOB verdict (getCallback → null → not
+  // confirmed) to reporting.
+  await h.service.resumeOobWait('scan-oob2');
+  assert.equal(h.statuses.at(-1), 'reporting');
+
+  // Idempotent: a second resume (e.g. a duplicate sweep tick) finds the thread no longer paused and
+  // makes no further status transition.
+  const before = h.statuses.length;
+  await h.service.resumeOobWait('scan-oob2');
+  assert.equal(h.statuses.length, before);
+
+  // A scan that was never at an OOB wait is a plain no-op too.
+  await h.service.resumeOobWait('never-started');
 });

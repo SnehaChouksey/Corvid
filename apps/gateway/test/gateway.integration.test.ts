@@ -91,6 +91,9 @@ function runIntegrationTests(databaseUrl: string): void {
           calls.cancels.push({ scanId, ownerId });
           return opts.cancel ?? 'cancelled';
         },
+        resumeOobWait: async () => {
+          /* not exercised by the gateway HTTP tests (the in-gateway sweep drives it) */
+        },
       },
     };
   }

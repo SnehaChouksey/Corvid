@@ -36,6 +36,11 @@ const EnvSchema = z
     OOB_HOST: z.string().min(1).optional(),
     OOB_REGISTER_URL: z.url().optional(),
     OOB_CONTROL_TOKEN: z.string().min(1).optional(),
+    // D-4 OOB wait bound + in-process sweep interval (ADR-32/ADR-33). A blind-SSRF hypothesis waits at
+    // the durable `awaitOob` interrupt until the bound elapses, then the sweep resumes it to a verdict.
+    // Defaults are the spec's 5-min bound / 1-min tick; a calibration run can shorten them.
+    OOB_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+    OOB_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
     PORT: z.coerce.number().int().positive().default(8787),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),

@@ -10,6 +10,7 @@ import {
 import { createAuth } from '@corvid/auth';
 import { createCipher, loadKey } from '@corvid/crypto';
 import {
+  appendAudit,
   createDb,
   insertFinding,
   recordApprovalDecision,
@@ -26,6 +27,8 @@ import {
   createReportQueue,
   honoRateLimitClient,
   HypothesisDedup,
+  OobCallbackStore,
+  OobPausedStore,
   type ReportQueue,
 } from '@corvid/redis';
 import {
@@ -33,6 +36,7 @@ import {
   createCheckpointer,
   createScanRuntimeService,
   type ScanGraphDeps,
+  sweepOobTimeouts,
 } from '@corvid/scan-runtime';
 import { scanCredentialsSchema } from '@corvid/tool-contracts';
 import { serve } from '@hono/node-server';
@@ -164,16 +168,31 @@ if (env.REDIS_URL !== undefined) {
   crawlPort = async () => notLive('crawl');
 }
 
+// ── OOB (blind SSRF, D-16/ADR-09) enablement ──────────────────────────────────────────────────────
+// SSRF confirmation needs BOTH the listener coordinates (OOB_HOST/REGISTER_URL/CONTROL_TOKEN) AND a
+// shared Redis: the burst registers a token from inside the sandbox, the listener records the target's
+// callback, and this process reads the verdict — all against ONE ledger. All-or-nothing: without both,
+// SSRF hypotheses are skipped (never sent) and a blind SSRF can never reach a durable wait. OOB_HOST is
+// also added to the sandbox egress allow-list (in the observe port) so the burst can reach the listener.
+const oobConfig =
+  env.OOB_HOST !== undefined && env.OOB_REGISTER_URL !== undefined && env.OOB_CONTROL_TOKEN !== undefined
+    ? { host: env.OOB_HOST, registerUrl: env.OOB_REGISTER_URL, controlToken: env.OOB_CONTROL_TOKEN }
+    : undefined;
+if (oobConfig !== undefined && runtimeRedis === undefined) {
+  logger.warn('OOB_* set but REDIS_URL is not — blind SSRF disabled (the callback ledger needs the shared Redis)');
+}
+// Narrowing the ternary on runtimeRedis lets TS see it as non-undefined inside — no `!` assertions.
+const oobCallbackStore =
+  oobConfig !== undefined && runtimeRedis !== undefined ? new OobCallbackStore(runtimeRedis) : undefined;
+const oobPausedStore =
+  oobConfig !== undefined && runtimeRedis !== undefined ? new OobPausedStore(runtimeRedis) : undefined;
+
 // ── Observe port (Phase 2, slab 3c): run the testing burst inside a per-burst E2B sandbox ─────────
 // Needs the E2B key (the sandbox) — without it, observe fails fast so a scan never "tests" without the
-// egress-restricted sandbox that is the whole safety model (ADR-22). OOB is all-or-nothing: with all
-// three OOB vars, blind-SSRF confirmation is enabled; without them, SSRF hypotheses are skipped.
+// egress-restricted sandbox that is the whole safety model (ADR-22). SSRF is only sent when OOB is
+// fully enabled (config + shared Redis, above), so a callback can actually be recorded and read.
 let observePort: ScanGraphDeps['observe'];
 if (env.E2B_API_KEY !== undefined) {
-  const oob =
-    env.OOB_HOST !== undefined && env.OOB_REGISTER_URL !== undefined && env.OOB_CONTROL_TOKEN !== undefined
-      ? { host: env.OOB_HOST, registerUrl: env.OOB_REGISTER_URL, controlToken: env.OOB_CONTROL_TOKEN }
-      : undefined;
   observePort = createObservePort({
     db,
     sandboxFactory: createE2bSandboxFactory(env.E2B_API_KEY),
@@ -181,7 +200,7 @@ if (env.E2B_API_KEY !== undefined) {
     bundle: readFileSync(resolveBurstBundlePath(), 'utf8'),
     // Decrypt + validate transiently; the plaintext never leaves this closure or reaches a log (§5).
     decrypt: (ciphertext) => scanCredentialsSchema.parse(JSON.parse(credentialCipher.decrypt(ciphertext))),
-    ...(oob !== undefined ? { oob } : {}),
+    ...(oobCallbackStore !== undefined && oobConfig !== undefined ? { oob: oobConfig } : {}),
     logger,
   });
 } else {
@@ -203,9 +222,12 @@ const graphDeps: ScanGraphDeps = {
       severity: f.severity,
     });
   },
-  // No OOB confirmation until the listener store is wired (Unit 0/8); a blind SSRF then times out to
-  // not_confirmed, which is the safe default (never a false positive).
-  oob: { getCallback: async () => null },
+  // Blind-SSRF confirmation reads the correlated callback from the shared listener ledger (never a
+  // socket result — ADR-01/D-16). When OOB isn't fully enabled, this returns null: SSRF is never sent
+  // in the first place, and any stray pending token resolves to not_confirmed (the safe default).
+  oob: {
+    getCallback: async (token: string) => (oobCallbackStore !== undefined ? oobCallbackStore.getCallback(token) : null),
+  },
 };
 const scanRuntime = createScanRuntimeService({
   graph: buildScanGraph(checkpointer, graphDeps),
@@ -231,8 +253,46 @@ const scanRuntime = createScanRuntimeService({
   background: (task) => {
     void task(); // `drive` catches its own errors and logs with safe fields; never rejects
   },
+  // When a run pauses at the blind-SSRF wait, register it so the sweep resumes it at the D-4 bound.
+  ...(oobPausedStore !== undefined
+    ? { onOobWait: (scanId: string) => oobPausedStore.add(scanId, Date.now()) }
+    : {}),
   logger,
 });
+
+// ── OOB-timeout sweep (D-4, ADR-32/ADR-33) ────────────────────────────────────────────────────────
+// v1 runs the sweep in-process on an interval (ADR-33 deferred the standalone worker; ADR-35 records
+// the in-gateway placement). Each tick resumes every scan whose OOB wait has passed the D-4 bound so a
+// blind SSRF resolves to a verdict (verified iff a correlated callback landed) and the scan never
+// hangs. The paused registry is Redis-backed, so a gateway restart mid-wait doesn't strand a scan.
+if (oobPausedStore !== undefined) {
+  const pausedStore = oobPausedStore;
+  const tick = async (): Promise<void> => {
+    try {
+      const resolved = await sweepOobTimeouts(
+        {
+          listPausedOob: () => pausedStore.list(),
+          resume: (threadId) => scanRuntime.resumeOobWait(threadId),
+          audit: (entry) => appendAudit(db, { scanId: entry.scanId, actor: 'system', action: entry.action }),
+          logger,
+          maxAgeMs: env.OOB_TIMEOUT_MS,
+        },
+        Date.now(),
+      );
+      // Drop resolved scans from the registry; sweepOobTimeouts only returns threads whose resume
+      // actually completed, so a failed resume stays registered and is retried next tick.
+      for (const threadId of resolved) await pausedStore.remove(threadId);
+    } catch (err) {
+      logger.error({ err_name: err instanceof Error ? err.name : 'unknown' }, 'oob sweep tick failed');
+    }
+  };
+  // unref so the sweep never by itself keeps the process alive; the HTTP server owns the lifetime.
+  setInterval(() => void tick(), env.OOB_SWEEP_INTERVAL_MS).unref();
+  logger.info(
+    { intervalMs: env.OOB_SWEEP_INTERVAL_MS, timeoutMs: env.OOB_TIMEOUT_MS },
+    'oob-timeout sweep enabled (in-gateway, v1)',
+  );
+}
 
 // Redis-backed rate-limit store when REDIS_URL is set (shared across instances, ADR-20). Without
 // it, hono-rate-limiter's in-memory store is used — correct for a single instance only.

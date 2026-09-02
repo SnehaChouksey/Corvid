@@ -2,6 +2,7 @@ import type { ApprovalOutcome, CancelOutcome, ScanStatus } from '@corvid/tool-co
 import { Command } from '@langchain/langgraph';
 
 import type { buildScanGraph } from './graph.ts';
+import type { OobWaitResume } from './verify-phase.ts';
 
 // The seam between the thin API gateway and the durable scan runtime (ADR-27). The gateway signals
 // the workflow through this service (`02` §6) rather than driving LangGraph itself. In v1 the service
@@ -24,6 +25,15 @@ export interface ScanRuntimeService {
   submitApproval(scanId: string, ownerId: string, submission: ApprovalSubmission): Promise<ApprovalOutcome>;
   /** Cancel an active scan; a cancelled scan is never resumed. */
   cancel(scanId: string, ownerId: string): Promise<CancelOutcome>;
+  /**
+   * Resolve a scan paused at the `awaitOob` interrupt with the D-4 timeout signal, so the graph reads
+   * the OOB ledger and finalizes each pending token (verified vs not_confirmed), then persists the
+   * resulting status. Idempotent: a scan not paused at `awaitOob` (already resolved) is a no-op, so a
+   * duplicate sweep tick can't re-resume a terminal thread. Awaits completion (unlike the fire-and-
+   * forget resumes above) so the OOB sweep learns whether the resume actually happened — and RETHROWS
+   * on failure so a failed resume is retried next tick rather than dropped from the paused registry.
+   */
+  resumeOobWait(scanId: string): Promise<void>;
 }
 
 export interface ScanRuntimeServiceDeps {
@@ -40,6 +50,12 @@ export interface ScanRuntimeServiceDeps {
    * await the scheduled work; the composition root passes a fire-and-forget impl.
    */
   background(task: () => Promise<void>): void;
+  /**
+   * Called when a graph run pauses at the `awaitOob` interrupt (blind SSRF). The composition root
+   * records the scan in the durable paused registry the OOB sweep reads (ADR-32). Optional: when
+   * absent (no OOB listener wired), SSRF is never tested, so this never fires.
+   */
+  onOobWait?(scanId: string): Promise<void>;
   readonly logger?: { error(obj: Record<string, unknown>, msg: string): void };
 }
 
@@ -51,9 +67,21 @@ export function createScanRuntimeService(deps: ScanRuntimeServiceDeps): ScanRunt
   // fields only (§5) and left for the durable checkpointer to resume — never rethrown into a caller.
   async function drive(scanId: string, invoke: () => Promise<unknown>): Promise<void> {
     try {
-      const result = (await invoke()) as { readonly status?: ScanStatus };
+      const result = (await invoke()) as {
+        readonly status?: ScanStatus;
+        readonly __interrupt__?: ReadonlyArray<{ readonly value?: unknown }>;
+      };
       if (result.status !== undefined) {
         await deps.persistStatus(scanId, result.status);
+      }
+      // If this run paused at the blind-SSRF wait, register it so the OOB sweep resumes it at the D-4
+      // bound. Done AFTER persistStatus but inside the same try: a failure here is logged, not fatal —
+      // the checkpointer still holds the pause, and a registry gap is a liveness (not safety) risk.
+      const pausedAtOob = result.__interrupt__?.some(
+        (i) => (i.value as { kind?: unknown } | undefined)?.kind === 'oob_wait',
+      );
+      if (pausedAtOob === true && deps.onOobWait !== undefined) {
+        await deps.onOobWait(scanId);
       }
     } catch (cause) {
       deps.logger?.error(
@@ -92,6 +120,24 @@ export function createScanRuntimeService(deps: ScanRuntimeServiceDeps): ScanRunt
       // No resume: a cancelled scan's paused interrupt is abandoned (never resumed), so no payload
       // fires. The DB transition is the single source of truth.
       return deps.requestCancel(scanId, ownerId);
+    },
+
+    async resumeOobWait(scanId) {
+      // Idempotent guard: only resume a thread actually paused at `awaitOob`. A duplicate sweep tick
+      // (or a resume that already ran but whose registry cleanup was lost) finds `next` no longer at
+      // the OOB node and returns without re-invoking — a terminal thread is never re-driven.
+      const snapshot = await deps.graph.getState(config(scanId));
+      if (!snapshot.next.includes('awaitOob')) return;
+      // Resume with the D-4 timeout signal (the only valid `awaitOob` resume — the node fails closed on
+      // anything else). This drives the graph through the OOB verdicts to `reporting`. Errors PROPAGATE
+      // (unlike `drive`) so the sweep can retry rather than silently drop the paused entry.
+      const result = (await deps.graph.invoke(
+        new Command({ resume: { timedOut: true } satisfies OobWaitResume }),
+        config(scanId),
+      )) as { readonly status?: ScanStatus };
+      if (result.status !== undefined) {
+        await deps.persistStatus(scanId, result.status);
+      }
     },
   };
 }

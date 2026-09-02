@@ -96,3 +96,58 @@ export class OobCallbackStore {
     }
   }
 }
+
+/** One scan paused at the durable `awaitOob` interrupt, and when its wait began (epoch ms). */
+export interface PausedOobThread {
+  readonly threadId: string;
+  readonly interruptedAt: number;
+}
+
+/**
+ * Redis-backed registry of scans currently paused at the `awaitOob` interrupt (D-4). The gateway
+ * records a scan here when its graph run pauses for the out-of-band callback, and the periodic OOB
+ * sweep reads it to find waits past the D-4 bound and resume them (ADR-32/ADR-33). Redis (not
+ * in-process) so the registry survives a gateway restart mid-wait and a later restart's sweep still
+ * resolves the pause — a paused scan whose registry entry was lost would hang forever.
+ *
+ * This is a liveness aid, not a safety gate: the durable authority for what's paused is the LangGraph
+ * checkpointer; reconstructing the registry from it (so a lost entry self-heals) is deferred hardening.
+ */
+export class OobPausedStore {
+  readonly #redis: Redis;
+  readonly #key = `${NAMESPACE}:paused`;
+
+  constructor(redis: Redis) {
+    this.#redis = redis;
+  }
+
+  /** Record a scan as paused at `awaitOob`, stamped with when the wait began. Idempotent per scan. */
+  async add(threadId: string, interruptedAtMs: number): Promise<void> {
+    try {
+      await this.#redis.hset(this.#key, threadId, String(interruptedAtMs));
+    } catch (cause) {
+      throw new InfraError('oob-paused add failed', { retryable: true, cause });
+    }
+  }
+
+  /** Drop a scan from the registry once its wait is resolved (resumed to a verdict). */
+  async remove(threadId: string): Promise<void> {
+    try {
+      await this.#redis.hdel(this.#key, threadId);
+    } catch (cause) {
+      throw new InfraError('oob-paused remove failed', { retryable: true, cause });
+    }
+  }
+
+  /** Every scan currently registered as paused, with when each began waiting. */
+  async list(): Promise<readonly PausedOobThread[]> {
+    try {
+      const all = await this.#redis.hgetall(this.#key);
+      return Object.entries(all)
+        .map(([threadId, v]) => ({ threadId, interruptedAt: Number(v) }))
+        .filter((t) => Number.isFinite(t.interruptedAt));
+    } catch (cause) {
+      throw new InfraError('oob-paused list failed', { retryable: true, cause });
+    }
+  }
+}
