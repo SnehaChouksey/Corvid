@@ -5,18 +5,18 @@ import { zValidator } from '@hono/zod-validator';
 import { type Context, Hono } from 'hono';
 import * as z from 'zod';
 
-import { classifyHost } from './capture.ts';
+import { classifyPath } from './capture.ts';
 import type { OobStore } from './store.ts';
 
-// The self-hosted OOB callback listener (ADR-09, D-16). One Hono app plays two roles, told apart by
-// the request Host (see capture.ts):
-//   - control plane on the apex host: `POST /register` mints a token; `GET /callbacks/:token` is the
-//     verifier's read. These are internal and BEARER-AUTHENTICATED (a shared control token) — the
-//     Host header alone is attacker-controlled and cannot be the only thing gating them.
-//   - callback capture on `<token>.<OOB_HOST>`: ANY path is a callback — a target's server-side fetch
-//     reached us. It is recorded (correlated to a registered token) with its provenance (source IP +
-//     time) and answered with a benign 200, so we never leak which tokens are live and never reflect
-//     attacker-controlled content.
+// The self-hosted OOB callback listener (ADR-09, D-16; path-token scheme ADR-36). One Hono app plays
+// two roles on ONE public host, told apart by the URL path (see capture.ts):
+//   - control plane: `POST /register` mints a token; `GET /callbacks/:token` is the verifier's read.
+//     These are internal and BEARER-AUTHENTICATED (a shared control token) — never gated by host, which
+//     a tunnel/proxy rewrites and an attacker controls.
+//   - callback capture at `<base>/<token>`: a token-shaped first path segment is a callback — a target's
+//     server-side fetch reached us. It is recorded (correlated to a registered token) with its
+//     provenance (source IP + time) and answered with a benign 200, so we never leak which tokens are
+//     live and never reflect attacker-controlled content.
 // Every registration and every recorded callback is audited (ADR-16). The gate NEVER runs here — the
 // listener only records the out-of-band fact; `@corvid/verify` decides `verified` (ADR-01).
 
@@ -34,8 +34,8 @@ export interface OobAppDeps {
   readonly store: OobStore;
   readonly audit: AuditSink;
   readonly logger: CorvidLogger;
-  /** The wildcard apex the listener owns; a callback host is `<token>.<oobHost>`. */
-  readonly oobHost: string;
+  /** The listener's public base URL (scheme+host, no trailing slash); the payload is `<base>/<token>`. */
+  readonly publicBase: string;
   /** Shared bearer token gating the control plane (register/query). Fail-closed: required (§9). */
   readonly controlToken: string;
 }
@@ -56,12 +56,12 @@ function sourceIp(c: Context): string | undefined {
 export function createOobApp(deps: OobAppDeps): Hono {
   const app = new Hono();
 
-  // Host-based routing runs first: a token-subdomain request is a callback (recorded + 200), a
-  // foreign host is ignored (404), and only an apex request falls through to the control routes.
-  // This ensures a callback that hits an arbitrary path (e.g. `/register`) is treated as a callback,
-  // not misrouted into the control plane.
+  // Path-based routing runs first: a token-shaped first path segment is a callback (recorded + 200);
+  // every other path falls through to the control routes below (bearer-gated) or 404s. A callback URL
+  // is always `<base>/<token>`, so it can never collide with the fixed `/register` / `/callbacks/*`
+  // control paths (neither is token-shaped).
   app.use('*', async (c, next) => {
-    const classification = classifyHost(c.req.header('host'), deps.oobHost);
+    const classification = classifyPath(c.req.path);
     if (classification.kind === 'callback') {
       const ip = sourceIp(c);
       const record = await deps.store.markCalledBack(classification.token, {
@@ -87,9 +87,7 @@ export function createOobApp(deps: OobAppDeps): Hono {
       // Benign, constant response regardless of whether the token was live — no oracle for probers.
       return c.text('ok', 200);
     }
-    if (classification.kind === 'ignore') {
-      return c.text('not found', 404);
-    }
+    // Not a callback — hand to the control routes (bearer-gated); an unmatched path 404s.
     return next();
   });
 
@@ -102,7 +100,7 @@ export function createOobApp(deps: OobAppDeps): Hono {
     const { scanId } = c.req.valid('json');
     const token = await deps.store.register(scanId);
     await deps.audit.append({ scanId, action: 'oob.register', detail: `token=${token.slice(0, 8)}` });
-    return c.json({ token, host: deps.oobHost });
+    return c.json({ token, base: deps.publicBase });
   });
 
   app.get('/callbacks/:token', async (c) => {

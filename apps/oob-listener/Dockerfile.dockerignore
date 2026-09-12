@@ -1,0 +1,12 @@
+# Scoped ignore for `docker build -f apps/oob-listener/Dockerfile .` (BuildKit reads
+# <dockerfile>.dockerignore in preference to a root .dockerignore). Keeps the build context small and
+# forces a clean, reproducible install+build inside the image rather than shipping host artifacts.
+**/node_modules
+**/dist
+**/.turbo
+**/.next
+.git
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example

@@ -11,7 +11,7 @@ import type { NotSent, SendFn, TesterTarget } from './types.ts';
 
 /** Registers a per-scan OOB token with the listener; the real one lands in Unit 5, a fake in tests. */
 export interface OobRegistrar {
-  register(scanId: string): Promise<{ token: string; host: string }>;
+  register(scanId: string): Promise<{ token: string; base: string }>;
 }
 
 export interface SsrfCheckInput {
@@ -24,9 +24,10 @@ export type SsrfOutcome = { readonly kind: 'observed'; readonly observation: Ssr
 
 export async function ssrfCheck(send: SendFn, oob: OobRegistrar, input: SsrfCheckInput): Promise<SsrfOutcome> {
   const { target, param } = input;
-  const { token, host } = await oob.register(target.scanId);
-  // A DNS/HTTP callback to `<token>.<oob-host>` uniquely identifies THIS test when it fires.
-  const payloadUrl = `http://${token}.${host}/`;
+  const { token, base } = await oob.register(target.scanId);
+  // An HTTP callback to `<base>/<token>` uniquely identifies THIS test when it fires (path-token
+  // scheme, ADR-36 — one public host, no wildcard DNS). Trim a trailing slash so we never emit `//`.
+  const payloadUrl = `${base.replace(/\/+$/, '')}/${token}`;
 
   const injected = injectPayload(target.url, input.baseBody, param, payloadUrl);
   if (!injected.ok) return { kind: 'not_sent', reason: 'unsupported', detail: injected.reason };

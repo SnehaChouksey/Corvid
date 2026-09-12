@@ -14,7 +14,7 @@ const target = {
 // ---- ssrf.check ----
 
 const fakeOob: OobRegistrar = {
-  register: async () => ({ token: 'tok-abc123', host: 'oob.corvid.test' }),
+  register: async () => ({ token: 'tok-abc123', base: 'https://oob.corvid.test' }),
 };
 
 test('ssrf tester registers a token, injects the OOB URL into the param, and records it as sent', async () => {
@@ -34,7 +34,7 @@ test('ssrf tester registers a token, injects the OOB URL into the param, and rec
     assert.equal(outcome.observation.sent, true);
   }
   // The injected param value references the unique OOB token — that is what a callback will identify.
-  assert.equal(new URL(sentUrl).searchParams.get('target'), 'http://tok-abc123.oob.corvid.test/');
+  assert.equal(new URL(sentUrl).searchParams.get('target'), 'https://oob.corvid.test/tok-abc123');
 });
 
 test('ssrf records sent:false when http.send refuses (payload did not go out)', async () => {

@@ -15,7 +15,7 @@ export interface OobCallbackRecord {
 }
 
 export interface OobStore {
-  /** Mint a unique token bound to a scan; the payload references `<token>.<host>`. */
+  /** Mint a unique token bound to a scan; the payload references `<base>/<token>`. */
   register(scanId: string): Promise<string>;
   /** Record an inbound callback; recorded only if the token was registered (returns owning scan). */
   markCalledBack(token: string, callback: OobCallback): Promise<OobCallbackRecord>;

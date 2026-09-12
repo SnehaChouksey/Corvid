@@ -3,8 +3,9 @@ import type { OobCallback, SsrfObservation } from '@corvid/tool-contracts';
 import { DEFAULT_SEVERITY, notConfirmed, type VerifyResult } from './types.ts';
 
 // SSRF verification (D-16). Blind SSRF is confirmed ONLY by a correlated out-of-band callback: the
-// target's server-side fetch reached `<token>.<oob-host>` and the self-hosted listener recorded a
-// callback for THAT unique, single-use token (ADR-09). The token correlation is the listener's job;
+// target's server-side fetch reached `<base>/<token>` and the self-hosted listener recorded a
+// callback for THAT unique, single-use token (ADR-09; path-token scheme ADR-36). The token
+// correlation is the listener's job;
 // the gate consumes the recorded callback (its provenance carried into the proof). Two false-positive
 // traps are structurally excluded:
 //   - a reflected input (the app echoing our URL string) is never the signal — only a real inbound

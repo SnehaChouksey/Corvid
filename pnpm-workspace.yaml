@@ -12,6 +12,11 @@ allowBuilds:
 # while making `pnpm install` exit 0 instead of erroring on an unreviewed build.
 ignoredBuiltDependencies:
   - esbuild
+  # msgpackr-extract is an optional native accelerator (pulled transitively via BullMQ's msgpackr).
+  # msgpackr works without it — it falls back to a pure-JS path — so we deliberately do NOT run its
+  # postinstall build, and acknowledge it here so a cold `pnpm install --frozen-lockfile` (CI / a
+  # Docker image build) exits 0 instead of erroring on an unreviewed build script.
+  - msgpackr-extract
 
 # Don't re-run a strict `pnpm install` before every `pnpm run`/turbo task: that pre-run check
 # aborts on the acknowledged-but-not-run esbuild build script above. Installs are managed

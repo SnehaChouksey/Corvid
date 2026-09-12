@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server';
 
 import { createOobApp } from './app.ts';
 import { DbAuditSink } from './audit.ts';
-import { loadEnv } from './env.ts';
+import { loadEnv, resolvePublicBase } from './env.ts';
 
 // Composition root: validate env (fail closed), wire dependencies, serve. Nothing here has logic
 // beyond wiring — the app is testable without a listening socket via `createOobApp(...).fetch`.
@@ -14,16 +14,17 @@ async function main(): Promise<void> {
   const logger = createLogger({ level: env.LOG_LEVEL, service: 'oob-listener' });
   const { db } = createDb(env.DATABASE_URL);
   const store = new OobCallbackStore(createRedis(env.REDIS_URL, logger));
+  const publicBase = resolvePublicBase(env);
 
   const app = createOobApp({
     store,
     audit: new DbAuditSink(db),
     logger,
-    oobHost: env.OOB_HOST,
+    publicBase,
     controlToken: env.OOB_CONTROL_TOKEN,
   });
   serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-    logger.info({ port: info.port, oobHost: env.OOB_HOST }, 'oob-listener listening');
+    logger.info({ port: info.port, publicBase }, 'oob-listener listening');
   });
 }
 

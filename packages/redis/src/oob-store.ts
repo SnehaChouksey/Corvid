@@ -20,8 +20,8 @@ export interface OobCallbackRecord {
  * Redis-backed OOB token registry + callback ledger for the self-hosted listener (ADR-09, D-16).
  *
  * A token is single-use and correlated: `register` mints a unique token bound to one scan; a later
- * inbound callback to `<token>.<host>` is recorded ONLY if that token was registered (an arbitrary
- * subdomain probe records nothing — correlation is the guard against a false positive). The verifier
+ * inbound callback to `<base>/<token>` is recorded ONLY if that token was registered (an arbitrary
+ * path probe records nothing — correlation is the guard against a false positive). The verifier
  * reads `getCallback` and gets the callback's provenance (receivedAt + sourceIp), which the proof
  * carries. Redis (not in-process memory) so a register in one service and the query in another see
  * the same ledger, and a listener restart mid-wait doesn't lose a pending token.
@@ -47,9 +47,9 @@ export class OobCallbackStore {
     return `${NAMESPACE}:cb:${token}`;
   }
 
-  /** Mint a unique single-use token bound to a scan; the payload references `<token>.<host>`. */
+  /** Mint a unique single-use token bound to a scan; the payload references `<base>/<token>`. */
   async register(scanId: string): Promise<string> {
-    const token = randomBytes(16).toString('hex'); // 32 hex chars — a safe, unique DNS label
+    const token = randomBytes(16).toString('hex'); // 32 hex chars — unguessable, URL-safe path segment
     try {
       await this.#redis.set(this.#tokenKey(token), scanId, 'EX', this.#ttlSeconds);
       return token;

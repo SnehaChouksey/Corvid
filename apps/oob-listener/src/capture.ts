@@ -1,38 +1,29 @@
-// Pure classification of an inbound request by its Host header (no I/O, unit-testable). The listener
-// serves two roles on one process, told apart by host:
-//   - the apex `OOB_HOST` is the internal control plane (register a token / query a callback);
-//   - `<token>.<OOB_HOST>` is a callback — the target's server-side fetch reached us out of band.
-// Any other host is ignored (not ours). The token is the leftmost DNS label; correlation to a
-// registered token happens in the store, so an arbitrary `<junk>.<OOB_HOST>` probe is harmless.
+// Pure classification of an inbound request by its URL PATH (no I/O, unit-testable). Path-token scheme
+// (ADR-36): the listener serves on ONE public host — no wildcard DNS — and tells its two roles apart by
+// the first path segment:
+//   - `<base>/<token>` is a callback — the target's server-side fetch reached us out of band. The token
+//     is the first path segment; correlation to a registered token happens in the store, so an
+//     arbitrary `<base>/<junk>` probe is harmless.
+//   - every other path (`/register`, `/callbacks/:token`, anything else) is left for the control routes,
+//     which are bearer-gated; an unmatched path 404s.
+// Host is deliberately NOT part of the decision: behind a tunnel or reverse proxy the Host header is
+// rewritten, and correlation (an unguessable 128-bit token) — not the host — is the real guard.
 
 import { OOB_TOKEN } from '@corvid/redis';
 
-export type HostClassification =
-  | { readonly kind: 'control' }
+export type RequestClassification =
   | { readonly kind: 'callback'; readonly token: string }
-  | { readonly kind: 'ignore' };
+  | { readonly kind: 'control' };
 
-/** Strip an optional `:port` and lowercase; Host headers may carry either. */
-function normalizeHost(hostHeader: string): string {
-  const withoutPort = hostHeader.split(':', 1)[0] ?? '';
-  return withoutPort.trim().toLowerCase();
-}
-
-export function classifyHost(hostHeader: string | undefined, oobHost: string): HostClassification {
-  if (hostHeader === undefined || hostHeader.length === 0) return { kind: 'ignore' };
-  const host = normalizeHost(hostHeader);
-  const apex = oobHost.trim().toLowerCase();
-  if (host.length === 0 || apex.length === 0) return { kind: 'ignore' };
-
-  if (host === apex) return { kind: 'control' };
-
-  const suffix = `.${apex}`;
-  if (!host.endsWith(suffix)) return { kind: 'ignore' };
-
-  // A callback host is EXACTLY `<token>.<apex>` — the prefix must be a single label matching the
-  // fixed token shape. A multi-label prefix (`<token>.extra.<apex>`) or a malformed one is ignored
-  // rather than treated as a never-registered token (the Host header is attacker-controlled).
-  const prefix = host.slice(0, host.length - suffix.length);
-  if (!OOB_TOKEN.test(prefix)) return { kind: 'ignore' };
-  return { kind: 'callback', token: prefix };
+/**
+ * Classify by the first path segment. A token-shaped first segment is a callback; anything else
+ * (including `register` and `callbacks`, which are never token-shaped) falls through to the control
+ * routes. The token match is exact against the fixed shape, so a malformed segment is never treated as
+ * a token — it just isn't a callback.
+ */
+export function classifyPath(pathname: string): RequestClassification {
+  const firstSegment = pathname.replace(/^\/+/, '').split('/', 1)[0] ?? '';
+  const token = firstSegment.trim().toLowerCase();
+  if (OOB_TOKEN.test(token)) return { kind: 'callback', token };
+  return { kind: 'control' };
 }

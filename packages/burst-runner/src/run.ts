@@ -48,11 +48,11 @@ function httpOobRegister(oob: NonNullable<BurstInput['oob']>): OobRegistrar['reg
       body: JSON.stringify({ scanId }),
     });
     if (!res.ok) throw new Error(`oob_register_http_${res.status}`);
-    const data = (await res.json()) as { token?: unknown; host?: unknown };
-    if (typeof data.token !== 'string' || typeof data.host !== 'string') {
+    const data = (await res.json()) as { token?: unknown; base?: unknown };
+    if (typeof data.token !== 'string' || typeof data.base !== 'string') {
       throw new Error('oob_register_bad_response');
     }
-    return { token: data.token, host: data.host };
+    return { token: data.token, base: data.base };
   };
 }
 
