@@ -163,6 +163,12 @@ function toAuditEntry(a: AuditRow) {
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  // Liveness probe for the host's health check (Render/Fly/etc). Deliberately public, before the auth
+  // guard, and pure — it never touches Postgres/Redis, so it reports "the process is up and serving",
+  // not "every dependency is healthy" (a readiness check that fails closed on a transient DB blip would
+  // make the host restart-loop a working gateway). No secrets, no side effects.
+  app.get('/health', (c) => c.json({ status: 'ok' }));
+
   // Public auth surface (Better Auth owns sign-up/sign-in/session). It's the one endpoint an
   // unauthenticated attacker can reach, so it gets its own IP-keyed rate limit (ADR-20) — the
   // per-user limiter below can't cover it (there is no user yet). Registered before the handler so

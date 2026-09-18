@@ -1,0 +1,85 @@
+# Render Blueprint for Corvid's backend (Infrastructure-as-Code). The dashboard (Next.js) deploys
+# SEPARATELY on Vercel — see docs/DEPLOY.md. Data stores (Postgres/Redis) are managed tiers (Neon +
+# Upstash, ADR-D9), NOT defined here, so they aren't tied to Render's lifecycle.
+#
+# Apply from the repo root: Render → New → Blueprint → pick this repo → it reads render.yaml.
+# Every `sync: false` var must be filled in the Render dashboard (secrets are never committed).
+#
+# ⚠️ TIER REALITY (see docs/DEPLOY.md): the gateway spawns Chromium (the crawler) and runs a scan
+#    burst; Render's free web tier (512 MB, spins down after 15 min idle) is marginal for that and a
+#    Background Worker has no free tier at all. `plan` is set to `starter` where it matters; drop to
+#    `free` only for a light demo, accepting OOM/spin-down risk.
+
+services:
+  # ── API gateway: REST surface + durable scan runtime + OOB sweep + crawler subprocess ───────────
+  - type: web
+    name: corvid-gateway
+    runtime: docker
+    dockerfilePath: ./apps/gateway/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8787
+      - key: DATABASE_URL # Neon (pooled connection string)
+        sync: false
+      - key: REDIS_URL # Upstash (rediss://…) — shared with the worker + OOB listener
+        sync: false
+      - key: BETTER_AUTH_SECRET # openssl rand -hex 32
+        sync: false
+      - key: BETTER_AUTH_URL # this service's public URL, e.g. https://corvid-gateway.onrender.com
+        sync: false
+      - key: TRUSTED_ORIGINS # the dashboard origin, e.g. https://corvid.vercel.app
+        sync: false
+      - key: ENCRYPTION_KEY # openssl rand -base64 32  (32-byte AES-256 key, D-1)
+        sync: false
+      - key: OPENROUTER_API_KEY # ADR-23
+        sync: false
+      - key: E2B_API_KEY # ADR-22
+        sync: false
+      # OOB (blind SSRF) — all-or-nothing; leave unset to ship without SSRF (other 4 classes unaffected).
+      - key: OOB_HOST
+        sync: false
+      - key: OOB_REGISTER_URL
+        sync: false
+      - key: OOB_CONTROL_TOKEN
+        sync: false
+
+  # ── Report worker: BullMQ consumer → verified-only report → PDF (Chromium) → complete scan ──────
+  - type: worker
+    name: corvid-report-worker
+    runtime: docker
+    dockerfilePath: ./apps/report-worker/Dockerfile
+    dockerContext: .
+    plan: starter
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL # MUST match the gateway's Redis (shared queue)
+        sync: false
+      - key: OPENROUTER_API_KEY # the report writer annotates the fixed finding list (ADR-21/23)
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+
+  # ── OOB callback listener: single public host, path-token scheme (ADR-36) ───────────────────────
+  - type: web
+    name: corvid-oob-listener
+    runtime: docker
+    dockerfilePath: ./apps/oob-listener/Dockerfile
+    dockerContext: .
+    plan: starter
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: OOB_HOST # this service's public host, e.g. corvid-oob-listener.onrender.com
+        sync: false
+      - key: OOB_PUBLIC_BASE # https://corvid-oob-listener.onrender.com
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL # MUST match the gateway's Redis (shared callback ledger)
+        sync: false
+      - key: OOB_CONTROL_TOKEN # MUST match the gateway's OOB_CONTROL_TOKEN
+        sync: false
